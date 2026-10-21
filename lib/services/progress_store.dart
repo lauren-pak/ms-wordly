@@ -1,0 +1,244 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../data/word_bank.dart';
+import '../models/word.dart';
+
+const int wordsPerDay = 3;
+const int maxReviewsPerDay = 12;
+
+/// Level at which a word counts as part of your active vocabulary.
+const int masteredLevel = 5;
+
+/// Days until the next review once a word reaches a level.
+const Map<int, int> _intervals = {1: 1, 2: 3, 3: 7, 4: 14, 5: 30, 6: 60};
+int intervalFor(int level) => _intervals[level] ?? 120;
+
+String dayKey(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+DateTime parseDay(String key) {
+  final p = key.split('-').map(int.parse).toList();
+  return DateTime.utc(p[0], p[1], p[2]);
+}
+
+String addDays(String key, int days) =>
+    dayKey(parseDay(key).add(Duration(days: days)));
+
+class WordProgress {
+  WordProgress({
+    required this.id,
+    required this.learnedOn,
+    required this.due,
+    this.level = 1,
+    this.correct = 0,
+    this.wrong = 0,
+    this.usedInLife = 0,
+    this.lastUsedOn,
+    List<String>? sentences,
+  }) : sentences = sentences ?? [];
+
+  final String id;
+  final String learnedOn;
+  String due;
+  int level;
+  int correct;
+  int wrong;
+  int usedInLife;
+  String? lastUsedOn;
+  final List<String> sentences;
+
+  bool get mastered => level >= masteredLevel;
+  Word get word => wordsById[id]!;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'learnedOn': learnedOn,
+    'due': due,
+    'level': level,
+    'correct': correct,
+    'wrong': wrong,
+    'usedInLife': usedInLife,
+    'lastUsedOn': lastUsedOn,
+    'sentences': sentences,
+  };
+
+  factory WordProgress.fromJson(Map<String, dynamic> j) => WordProgress(
+    id: j['id'] as String,
+    learnedOn: j['learnedOn'] as String,
+    due: j['due'] as String,
+    level: j['level'] as int,
+    correct: j['correct'] as int? ?? 0,
+    wrong: j['wrong'] as int? ?? 0,
+    usedInLife: j['usedInLife'] as int? ?? 0,
+    lastUsedOn: j['lastUsedOn'] as String?,
+    sentences: (j['sentences'] as List?)?.cast<String>(),
+  );
+}
+
+/// All learning state, persisted as one JSON blob.
+class ProgressStore extends ChangeNotifier {
+  ProgressStore(this._prefs, {DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now {
+    _load();
+  }
+
+  static const _key = 'ms_wordly_state_v1';
+
+  final SharedPreferences _prefs;
+  final DateTime Function() _clock;
+
+  final Map<String, WordProgress> progress = {};
+  final Set<String> completedDays = {};
+  int streak = 0;
+  int bestStreak = 0;
+  String? lastCompleted;
+  String? planDate;
+  List<String> planWordIds = [];
+
+  String get today => dayKey(_clock());
+
+  static Future<ProgressStore> open() async =>
+      ProgressStore(await SharedPreferences.getInstance());
+
+  void _load() {
+    final raw = _prefs.getString(_key);
+    if (raw == null) return;
+    final j = jsonDecode(raw) as Map<String, dynamic>;
+    for (final p in (j['progress'] as List)) {
+      final wp = WordProgress.fromJson(p as Map<String, dynamic>);
+      if (wordsById.containsKey(wp.id)) progress[wp.id] = wp;
+    }
+    completedDays.addAll((j['completedDays'] as List).cast<String>());
+    streak = j['streak'] as int;
+    bestStreak = j['bestStreak'] as int;
+    lastCompleted = j['lastCompleted'] as String?;
+    planDate = j['planDate'] as String?;
+    planWordIds = (j['planWordIds'] as List).cast<String>();
+  }
+
+  Future<void> _save() async {
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> _persist() async {
+    await _prefs.setString(
+      _key,
+      jsonEncode({
+        'progress': progress.values.map((p) => p.toJson()).toList(),
+        'completedDays': completedDays.toList(),
+        'streak': streak,
+        'bestStreak': bestStreak,
+        'lastCompleted': lastCompleted,
+        'planDate': planDate,
+        'planWordIds': planWordIds,
+      }),
+    );
+  }
+
+  /// The streak as it stands now: it is broken once a whole day is missed.
+  int get currentStreak {
+    final last = lastCompleted;
+    if (last == null) return 0;
+    if (last == today || last == addDays(today, -1)) return streak;
+    return 0;
+  }
+
+  bool get doneToday => completedDays.contains(today);
+
+  /// Today's new words, picked once per day in word bank order.
+  List<Word> get todaysNewWords {
+    _ensurePlan();
+    return planWordIds.map((id) => wordsById[id]!).toList();
+  }
+
+  void _ensurePlan() {
+    if (planDate == today) return;
+    planDate = today;
+    planWordIds = wordBank
+        .where((w) => !progress.containsKey(w.id))
+        .take(wordsPerDay)
+        .map((w) => w.id)
+        .toList();
+    _persist();
+  }
+
+  List<WordProgress> get dueReviews {
+    _ensurePlan();
+    final due =
+        progress.values
+            .where(
+              (p) => p.due.compareTo(today) <= 0 && !planWordIds.contains(p.id),
+            )
+            .toList()
+          ..sort((a, b) => a.due.compareTo(b.due));
+    return due.take(maxReviewsPerDay).toList();
+  }
+
+  List<WordProgress> get learnedWords =>
+      progress.values.toList()
+        ..sort((a, b) => b.learnedOn.compareTo(a.learnedOn));
+
+  int get masteredCount => progress.values.where((p) => p.mastered).length;
+  int get usedInLifeCount =>
+      progress.values.fold(0, (sum, p) => sum + p.usedInLife);
+  int get wordsRemaining => wordBank.length - progress.length;
+
+  /// Records a finished daily session. The result maps take a word id to
+  /// whether every exercise for that word was answered right the first time.
+  Future<void> completeSession({
+    required Map<String, bool> newWordResults,
+    required Map<String, bool> reviewResults,
+    Map<String, List<String>> sentences = const {},
+  }) async {
+    final t = today;
+    for (final e in newWordResults.entries) {
+      final p =
+          progress[e.key] ??
+          WordProgress(id: e.key, learnedOn: t, due: addDays(t, 1));
+      if (e.value) {
+        p.correct++;
+      } else {
+        p.wrong++;
+      }
+      progress[e.key] = p;
+    }
+    for (final e in reviewResults.entries) {
+      final p = progress[e.key];
+      if (p == null) continue;
+      if (e.value) {
+        p.correct++;
+        p.level++;
+        p.due = addDays(t, intervalFor(p.level));
+      } else {
+        p.wrong++;
+        p.level = (p.level - 1).clamp(1, 99);
+        p.due = addDays(t, 1);
+      }
+    }
+    for (final e in sentences.entries) {
+      progress[e.key]?.sentences.addAll(e.value.map((s) => s.trim()));
+    }
+    if (!completedDays.contains(t)) {
+      completedDays.add(t);
+      streak = lastCompleted == addDays(t, -1) ? streak + 1 : 1;
+      if (streak > bestStreak) bestStreak = streak;
+      lastCompleted = t;
+    }
+    await _save();
+  }
+
+  /// Using a word in real life is the best signal it is active vocabulary.
+  Future<void> markUsedInLife(String id) async {
+    final p = progress[id];
+    if (p == null || p.lastUsedOn == today) return;
+    p.usedInLife++;
+    p.lastUsedOn = today;
+    await _save();
+  }
+
+  bool usedToday(String id) => progress[id]?.lastUsedOn == today;
+}

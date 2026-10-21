@@ -1,0 +1,286 @@
+import 'package:flutter/material.dart';
+
+import '../services/progress_store.dart';
+import 'session_screen.dart';
+import 'words_screen.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key, required this.store});
+
+  final ProgressStore store;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  ProgressStore get store => widget.store;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Coming back to the app on a new day should show the new day's plan.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) setState(() {});
+  }
+
+  void startSession() =>
+      Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => SessionScreen(store: store)));
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) => Scaffold(
+        appBar: AppBar(
+          title: const Text(
+            'Ms Wordly',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Text(
+                '🔥 ${store.currentStreak}',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+          ],
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _StreakCard(store: store),
+            const SizedBox(height: 12),
+            store.doneToday
+                ? _DoneTodayCard(store: store)
+                : _TodayCard(store: store, onStart: startSession),
+            const SizedBox(height: 12),
+            _StatsRow(store: store),
+            const SizedBox(height: 12),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.menu_book),
+                title: const Text('My words'),
+                subtitle: Text('${store.progress.length} learned'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => WordsScreen(store: store)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StreakCard extends StatelessWidget {
+  const _StreakCard({required this.store});
+
+  final ProgressStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final today = store.today;
+    final days = [for (var i = 6; i >= 0; i--) addDays(today, -i)];
+    const letters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              store.currentStreak == 0
+                  ? 'Start a streak today'
+                  : '${store.currentStreak} day streak',
+              style: Theme.of(context).textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            Text('Best: ${store.bestStreak} days'),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                for (final d in days)
+                  Column(
+                    children: [
+                      Text(
+                        letters[parseDay(d).weekday - 1],
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: store.completedDays.contains(d)
+                            ? scheme.primary
+                            : scheme.surfaceContainerHighest,
+                        child: store.completedDays.contains(d)
+                            ? Icon(
+                                Icons.local_fire_department,
+                                size: 18,
+                                color: scheme.onPrimary,
+                              )
+                            : null,
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TodayCard extends StatelessWidget {
+  const _TodayCard({required this.store, required this.onStart});
+
+  final ProgressStore store;
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final newCount = store.todaysNewWords.length;
+    final reviewCount = store.dueReviews.length;
+    final parts = [
+      if (newCount > 0) '$newCount new ${newCount == 1 ? 'word' : 'words'}',
+      if (reviewCount > 0) '$reviewCount to review',
+    ];
+    return Card(
+      color: Theme.of(context).colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Today's words",
+              style: Theme.of(context).textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              parts.isEmpty
+                  ? 'All caught up. Check in to keep your streak.'
+                  : '${parts.join(' · ')} · about 5 minutes',
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onStart,
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Start'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DoneTodayCard extends StatelessWidget {
+  const _DoneTodayCard({required this.store});
+
+  final ProgressStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final words = store.todaysNewWords;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.check_circle,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Done for today',
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            if (words.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Text('Challenge: use each one in real life today.'),
+              const SizedBox(height: 8),
+              for (final w in words)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    w.word,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(w.definition),
+                  trailing: store.usedToday(w.id)
+                      ? const Chip(label: Text('Used ✓'))
+                      : OutlinedButton(
+                          onPressed: () => store.markUsedInLife(w.id),
+                          child: const Text('I used it'),
+                        ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatsRow extends StatelessWidget {
+  const _StatsRow({required this.store});
+
+  final ProgressStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget stat(String value, String label) => Expanded(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            children: [
+              Text(
+                value,
+                style: Theme.of(context).textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              Text(label, style: Theme.of(context).textTheme.labelMedium),
+            ],
+          ),
+        ),
+      ),
+    );
+    return Row(
+      children: [
+        stat('${store.progress.length}', 'Learned'),
+        stat('${store.masteredCount}', 'Active vocab'),
+        stat('${store.usedInLifeCount}', 'Used for real'),
+      ],
+    );
+  }
+}
