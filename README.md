@@ -29,6 +29,26 @@ moves it up a level and pushes the next review further out (1, 3, 7, 14, 30,
 word counts as part of your **active vocab**. Reviews rotate between fill-in,
 recall, and writing a new sentence so you have to produce the word each time.
 
+## Installing on iPhone (with a Mac and Xcode)
+
+1. Install Xcode from the Mac App Store and Flutter from
+   [flutter.dev](https://docs.flutter.dev/get-started/install/macos).
+2. Clone this repository and run `flutter pub get` in it.
+3. Open `ios/Runner.xcworkspace` in Xcode, select **Runner → Signing &
+   Capabilities**, and choose your Apple ID as the **Team**. If Xcode says the
+   bundle identifier is taken, change `com.mswordly.msWordly` to something
+   unique to you.
+4. Plug in your iPhone and turn on **Settings → Privacy & Security →
+   Developer Mode** (the phone restarts).
+5. Run `flutter run --release` and pick your phone.
+6. On the phone, trust your Apple ID under **Settings → General → VPN &
+   Device Management**.
+
+With a free Apple ID the app expires after 7 days: plug in and run step 5
+again. Installing over the existing app keeps your streak and words; deleting
+the app erases them. A paid Apple Developer account makes installs last a year
+and allows TestFlight.
+
 ## Installing on Android
 
 Every push to `main` builds an APK and publishes it on the repository's
