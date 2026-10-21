@@ -232,6 +232,7 @@ class _ChooseStepViewState extends State<ChooseStepView> {
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
+                disabledForegroundColor: scheme.onSurface,
                 backgroundColor: picked == null
                     ? null
                     : o.id == widget.word.id

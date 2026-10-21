@@ -29,39 +29,21 @@ moves it up a level and pushes the next review further out (1, 3, 7, 14, 30,
 word counts as part of your **active vocab**. Reviews rotate between fill-in,
 recall, and writing a new sentence so you have to produce the word each time.
 
-## Installing on iPhone (with a Mac and Xcode)
+## Installing on iPhone (home-screen web app)
 
-1. Install Xcode from the Mac App Store and Flutter from
-   [flutter.dev](https://docs.flutter.dev/get-started/install/macos).
-2. Clone this repository and run `flutter pub get` in it.
-3. Open `ios/Runner.xcworkspace` in Xcode, select **Runner → Signing &
-   Capabilities**, and choose your Apple ID as the **Team**. If Xcode says the
-   bundle identifier is taken, change `com.mswordly.msWordly` to something
-   unique to you.
-4. Plug in your iPhone and turn on **Settings → Privacy & Security →
-   Developer Mode** (the phone restarts).
-5. Run `flutter run --release` and pick your phone.
-6. On the phone, trust your Apple ID under **Settings → General → VPN &
-   Device Management**.
+Every push to `main` is tested and published to GitHub Pages at
+`https://<your-username>.github.io/ms-wordly/`.
 
-With a free Apple ID the app expires after 7 days: plug in and run step 5
-again. Installing over the existing app keeps your streak and words; deleting
-the app erases them. A paid Apple Developer account makes installs last a year
-and allows TestFlight.
+1. Open that link in **Safari** on your iPhone.
+2. Tap the **Share** button, then **Add to Home Screen**, then **Add**.
+3. Open Ms Wordly from the home screen. It runs full screen like an app.
 
-## Installing on Android
+Your progress is stored on the phone, inside the home-screen app. Deleting the
+home-screen icon erases it, so keep the icon. Always open the app from the icon
+rather than in a Safari tab, because the two keep separate progress.
 
-Every push to `main` builds an APK and publishes it on the repository's
-**Releases** page.
-
-1. On your phone, open the latest release (signed in to GitHub) and tap
-   `ms-wordly.apk`.
-2. Allow your browser to install unknown apps when Android asks.
-3. To update, install a newer release over the old one. Progress is kept.
-
-The APK is signed with a key committed in `android/app/` so updates install
-cleanly. That is fine for personal sideloading; make a new, secret key before
-publishing to the Play Store.
+One-time setup on GitHub: **Settings → Pages → Source: GitHub Actions**.
+GitHub Pages needs the repository to be public, unless you have GitHub Pro.
 
 ## Development
 

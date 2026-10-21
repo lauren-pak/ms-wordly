@@ -28,21 +28,10 @@ android {
         versionName = flutter.versionName
     }
 
-    // A fixed key so each new APK installs as an update over the last one
-    // (keeping your streak and progress). Personal sideloading only: make a
-    // new, secret key before ever publishing to the Play Store.
-    signingConfigs {
-        create("release") {
-            storeFile = file("ms-wordly-release.jks")
-            storePassword = "mswordly"
-            keyAlias = "mswordly"
-            keyPassword = "mswordly"
-        }
-    }
-
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // Debug keys for now; add a real release key before publishing.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
