@@ -10,7 +10,15 @@ class TestResultScreen extends StatelessWidget {
     super.key,
     required this.store,
     required this.results,
+    this.headline,
+    this.message,
   });
+
+  /// Replaces the "N / M recalled" headline.
+  final String? headline;
+
+  /// Replaces the line under the headline.
+  final String? message;
 
   final ProgressStore store;
 
@@ -36,7 +44,7 @@ class TestResultScreen extends StatelessWidget {
             Center(child: Mascot(size: 160, equipped: store.equipped)),
             Center(
               child: Text(
-                '$right / $total recalled',
+                headline ?? '$right / $total recalled',
                 style: text.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -45,11 +53,12 @@ class TestResultScreen extends StatelessWidget {
             const SizedBox(height: 8),
             Center(
               child: Text(
-                right == total
-                    ? 'Every word came straight to mind!'
-                    : right * 2 >= total
-                    ? 'Nice work. The rest come back tomorrow.'
-                    : 'These need more practice. They come back tomorrow.',
+                message ??
+                    (right == total
+                        ? 'Every word came straight to mind!'
+                        : right * 2 >= total
+                        ? 'Nice work. The rest come back tomorrow.'
+                        : 'These need more practice. They come back tomorrow.'),
                 textAlign: TextAlign.center,
                 style: text.titleMedium,
               ),

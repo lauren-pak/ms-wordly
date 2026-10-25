@@ -130,6 +130,10 @@ class ProgressStore extends ChangeNotifier {
 
   int testsTaken = 0;
   int perfectTests = 0;
+  int useItTests = 0;
+
+  /// Most words used correctly in one use-it test.
+  int bestUseIt = 0;
 
   /// Difficulty of new words; null mixes all levels.
   Difficulty? difficulty = Difficulty.stretch;
@@ -197,6 +201,8 @@ class ProgressStore extends ChangeNotifier {
     missionsCompleted = r['missionsCompleted'] as int? ?? 0;
     testsTaken = r['testsTaken'] as int? ?? 0;
     perfectTests = r['perfectTests'] as int? ?? 0;
+    useItTests = r['useItTests'] as int? ?? 0;
+    bestUseIt = r['bestUseIt'] as int? ?? 0;
   }
 
   Future<void> _save() async {
@@ -232,6 +238,8 @@ class ProgressStore extends ChangeNotifier {
           'missionsCompleted': missionsCompleted,
           'testsTaken': testsTaken,
           'perfectTests': perfectTests,
+          'useItTests': useItTests,
+          'bestUseIt': bestUseIt,
         },
       }),
     );
@@ -522,6 +530,32 @@ class ProgressStore extends ChangeNotifier {
     }
     final right = results.values.where((ok) => ok).length;
     lastReward = _award(testPoints + right);
+    await _save();
+  }
+
+  /// Records a use-it test: each learned word the user chose to use and
+  /// whether it was used well. Sentences are kept for later exercises, and
+  /// a misused word comes back tomorrow.
+  Future<void> completeUseItTest({
+    required Map<String, bool> results,
+    Map<String, List<String>> sentences = const {},
+  }) async {
+    final tomorrow = addDays(today, 1);
+    for (final e in results.entries) {
+      final p = progress[e.key];
+      if (p == null) continue;
+      if (e.value) {
+        p.correct++;
+      } else {
+        p.wrong++;
+        if (p.due.compareTo(tomorrow) > 0) p.due = tomorrow;
+      }
+    }
+    _recordWork(sentences, const {}, const {});
+    useItTests++;
+    final right = results.values.where((ok) => ok).length;
+    if (right > bestUseIt) bestUseIt = right;
+    lastReward = _award(testPoints + 2 * right);
     await _save();
   }
 

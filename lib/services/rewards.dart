@@ -148,6 +148,22 @@ final List<Achievement> achievements = [
     (s) => s.perfectTests >= 1,
   ),
   Achievement(
+    'use_it_1',
+    '🎤',
+    'Off script',
+    'Take your first use-it test',
+    20,
+    (s) => s.useItTests >= 1,
+  ),
+  Achievement(
+    'use_it_5',
+    '🌈',
+    'Natural',
+    'Use 5 words well in one use-it test',
+    80,
+    (s) => s.bestUseIt >= 5,
+  ),
+  Achievement(
     'sentences_10',
     '✍️',
     'Wordsmith',

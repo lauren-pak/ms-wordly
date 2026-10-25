@@ -7,6 +7,7 @@ import '../widgets/mascot.dart';
 import 'closet_screen.dart';
 import 'session_screen.dart';
 import 'settings_screen.dart';
+import 'use_it_test_screen.dart';
 import 'words_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -101,6 +102,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => startSession(SessionMode.test),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.record_voice_over_outlined),
+                  title: const Text('Use-it test'),
+                  subtitle: const Text(
+                    'Real-life prompts. You come up with which words to use.',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => UseItTestScreen(store: store),
+                    ),
+                  ),
                 ),
               ),
             ],
