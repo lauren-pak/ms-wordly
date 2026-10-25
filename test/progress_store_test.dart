@@ -90,4 +90,45 @@ void main() {
     expect(choose.options, hasLength(4));
     expect(choose.options, contains(choose.word));
   });
+
+  test('extra practice never pushes words out, misses come back', () async {
+    final s = await open();
+    await finishDay(s);
+    final ids = s.todaysNewWords.map((w) => w.id).toList();
+    now = DateTime(2026, 10, 22, 9);
+    await finishDay(s); // levels to 2, due in 3 days
+    await s.completePractice(results: {ids[0]: true, ids[1]: false});
+    expect(s.progress[ids[0]]!.level, 2);
+    expect(s.progress[ids[0]]!.due, '2026-10-25');
+    expect(s.progress[ids[1]]!.due, '2026-10-23');
+  });
+
+  test('more words after the daily session skip today\'s plan', () async {
+    final s = await open();
+    final today = s.todaysNewWords.map((w) => w.id);
+    final more = s.nextNewWords().map((w) => w.id);
+    expect(more, hasLength(3));
+    expect(more.toSet().intersection(today.toSet()), isEmpty);
+    await finishDay(s);
+    await s.completeSession(
+      newWordResults: {for (final id in more) id: true},
+      reviewResults: {},
+      challenges: {
+        more.first: ['question'],
+      },
+    );
+    expect(s.learnedToday, hasLength(6));
+    expect(s.currentStreak, 1);
+    final again = await open();
+    expect(again.progress[more.first]!.challengesDone, ['question']);
+  });
+
+  test('api key is stored and cleared', () async {
+    final s = await open();
+    expect(s.apiKey, isNull);
+    await s.setApiKey('  sk-ant-test ');
+    expect((await open()).apiKey, 'sk-ant-test');
+    await s.setApiKey('');
+    expect(s.apiKey, isNull);
+  });
 }

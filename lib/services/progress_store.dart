@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -38,7 +39,9 @@ class WordProgress {
     this.usedInLife = 0,
     this.lastUsedOn,
     List<String>? sentences,
-  }) : sentences = sentences ?? [];
+    List<String>? challengesDone,
+  }) : sentences = sentences ?? [],
+       challengesDone = challengesDone ?? [];
 
   final String id;
   final String learnedOn;
@@ -49,6 +52,9 @@ class WordProgress {
   int usedInLife;
   String? lastUsedOn;
   final List<String> sentences;
+
+  /// Sentence challenge ids already completed, so new ones rotate in.
+  final List<String> challengesDone;
 
   bool get mastered => level >= masteredLevel;
   Word get word => wordsById[id]!;
@@ -63,6 +69,7 @@ class WordProgress {
     'usedInLife': usedInLife,
     'lastUsedOn': lastUsedOn,
     'sentences': sentences,
+    'challengesDone': challengesDone,
   };
 
   factory WordProgress.fromJson(Map<String, dynamic> j) => WordProgress(
@@ -75,6 +82,7 @@ class WordProgress {
     usedInLife: j['usedInLife'] as int? ?? 0,
     lastUsedOn: j['lastUsedOn'] as String?,
     sentences: (j['sentences'] as List?)?.cast<String>(),
+    challengesDone: (j['challengesDone'] as List?)?.cast<String>(),
   );
 }
 
@@ -86,6 +94,7 @@ class ProgressStore extends ChangeNotifier {
   }
 
   static const _key = 'ms_wordly_state_v1';
+  static const _apiKeyKey = 'ms_wordly_anthropic_api_key';
 
   final SharedPreferences _prefs;
   final DateTime Function() _clock;
@@ -178,6 +187,34 @@ class ProgressStore extends ChangeNotifier {
     return due.take(maxReviewsPerDay).toList();
   }
 
+  /// Words beyond today's plan, for learning more after the daily session.
+  List<Word> nextNewWords([int count = wordsPerDay]) {
+    _ensurePlan();
+    return wordBank
+        .where(
+          (w) => !progress.containsKey(w.id) && !planWordIds.contains(w.id),
+        )
+        .take(count)
+        .map((w) => w)
+        .toList();
+  }
+
+  List<Word> get learnedToday => progress.values
+      .where((p) => p.learnedOn == today)
+      .map((p) => p.word)
+      .toList();
+
+  /// Learned words for extra practice, favoring the least solid ones.
+  List<WordProgress> practiceSet({int count = 5, Random? random}) {
+    final rng = random ?? Random();
+    final byLevel = progress.values.toList()
+      ..shuffle(rng)
+      ..sort((a, b) => a.level.compareTo(b.level));
+    return (byLevel.take(count * 2).toList()..shuffle(rng))
+        .take(count)
+        .toList();
+  }
+
   List<WordProgress> get learnedWords =>
       progress.values.toList()
         ..sort((a, b) => b.learnedOn.compareTo(a.learnedOn));
@@ -193,6 +230,7 @@ class ProgressStore extends ChangeNotifier {
     required Map<String, bool> newWordResults,
     required Map<String, bool> reviewResults,
     Map<String, List<String>> sentences = const {},
+    Map<String, List<String>> challenges = const {},
   }) async {
     final t = today;
     for (final e in newWordResults.entries) {
@@ -222,6 +260,9 @@ class ProgressStore extends ChangeNotifier {
     for (final e in sentences.entries) {
       progress[e.key]?.sentences.addAll(e.value.map((s) => s.trim()));
     }
+    for (final e in challenges.entries) {
+      progress[e.key]?.challengesDone.addAll(e.value);
+    }
     if (!completedDays.contains(t)) {
       completedDays.add(t);
       streak = lastCompleted == addDays(t, -1) ? streak + 1 : 1;
@@ -232,6 +273,33 @@ class ProgressStore extends ChangeNotifier {
   }
 
   /// Using a word in real life is the best signal it is active vocabulary.
+  /// Records extra practice. It never moves a word further out, but a miss
+  /// brings the word back tomorrow.
+  Future<void> completePractice({
+    required Map<String, bool> results,
+    Map<String, List<String>> sentences = const {},
+    Map<String, List<String>> challenges = const {},
+  }) async {
+    final tomorrow = addDays(today, 1);
+    for (final e in results.entries) {
+      final p = progress[e.key];
+      if (p == null) continue;
+      if (e.value) {
+        p.correct++;
+      } else {
+        p.wrong++;
+        if (p.due.compareTo(tomorrow) > 0) p.due = tomorrow;
+      }
+    }
+    for (final e in sentences.entries) {
+      progress[e.key]?.sentences.addAll(e.value.map((s) => s.trim()));
+    }
+    for (final e in challenges.entries) {
+      progress[e.key]?.challengesDone.addAll(e.value);
+    }
+    await _save();
+  }
+
   Future<void> markUsedInLife(String id) async {
     final p = progress[id];
     if (p == null || p.lastUsedOn == today) return;
@@ -241,4 +309,21 @@ class ProgressStore extends ChangeNotifier {
   }
 
   bool usedToday(String id) => progress[id]?.lastUsedOn == today;
+
+  /// The user's own Claude API key for sentence checking. It stays on
+  /// this device.
+  String? get apiKey {
+    final k = _prefs.getString(_apiKeyKey)?.trim();
+    return k == null || k.isEmpty ? null : k;
+  }
+
+  Future<void> setApiKey(String? key) async {
+    final k = key?.trim() ?? '';
+    if (k.isEmpty) {
+      await _prefs.remove(_apiKeyKey);
+    } else {
+      await _prefs.setString(_apiKeyKey, k);
+    }
+    notifyListeners();
+  }
 }

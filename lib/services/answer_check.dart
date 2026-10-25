@@ -59,3 +59,25 @@ bool sentenceUsesWord(String sentence, Word word) {
 
 int wordCount(String sentence) =>
     sentence.trim().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).length;
+
+Set<String> _tokens(String s) => s
+    .toLowerCase()
+    .split(RegExp(r"[^a-z']+"))
+    .where((t) => t.isNotEmpty)
+    .toSet();
+
+/// Word overlap between two sentences, from 0 (nothing shared) to 1.
+double similarity(String a, String b) {
+  final ta = _tokens(a);
+  final tb = _tokens(b);
+  if (ta.isEmpty || tb.isEmpty) return 0;
+  return ta.intersection(tb).length / ta.union(tb).length;
+}
+
+/// The earlier sentence [sentence] is too close to, if any.
+String? tooSimilarTo(String sentence, Iterable<String> earlier) {
+  for (final e in earlier) {
+    if (similarity(sentence, e) >= 0.6) return e;
+  }
+  return null;
+}

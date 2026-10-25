@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/progress_store.dart';
 import 'session_screen.dart';
+import 'settings_screen.dart';
 import 'words_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -34,9 +35,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) setState(() {});
   }
 
-  void startSession() =>
-      Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => SessionScreen(store: store)));
+  void startSession([SessionMode mode = SessionMode.daily]) =>
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SessionScreen(store: store, mode: mode),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -50,10 +54,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           actions: [
             Padding(
-              padding: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.only(right: 4),
               child: Text(
                 '🔥 ${store.currentStreak}',
                 style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Settings',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => SettingsScreen(store: store)),
               ),
             ),
           ],
@@ -63,9 +74,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             _StreakCard(store: store),
             const SizedBox(height: 12),
-            store.doneToday
-                ? _DoneTodayCard(store: store)
-                : _TodayCard(store: store, onStart: startSession),
+            if (store.doneToday) ...[
+              _DoneTodayCard(store: store),
+              const SizedBox(height: 12),
+              _KeepGoingCard(store: store, onStart: startSession),
+            ] else
+              _TodayCard(store: store, onStart: startSession),
             const SizedBox(height: 12),
             _StatsRow(store: store),
             const SizedBox(height: 12),
@@ -203,7 +217,7 @@ class _DoneTodayCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final words = store.todaysNewWords;
+    final words = store.learnedToday;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -281,6 +295,61 @@ class _StatsRow extends StatelessWidget {
         stat('${store.masteredCount}', 'Active vocab'),
         stat('${store.usedInLifeCount}', 'Used for real'),
       ],
+    );
+  }
+}
+
+/// After the daily session: as much extra work as you like.
+class _KeepGoingCard extends StatelessWidget {
+  const _KeepGoingCard({required this.store, required this.onStart});
+
+  final ProgressStore store;
+  final void Function(SessionMode) onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final more = store.nextNewWords().length;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Keep going',
+              style: Theme.of(context).textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const Text("Your streak is safe. Extra rounds are a bonus."),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: more == 0
+                        ? null
+                        : () => onStart(SessionMode.moreWords),
+                    icon: const Icon(Icons.add),
+                    label: Text(
+                      more == 0 ? 'No new words' : 'Learn $more more',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: store.progress.isEmpty
+                        ? null
+                        : () => onStart(SessionMode.practice),
+                    icon: const Icon(Icons.fitness_center),
+                    label: const Text('Practice'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

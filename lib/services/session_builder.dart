@@ -3,6 +3,7 @@ import 'dart:math';
 import '../data/word_bank.dart';
 import '../models/word.dart';
 import 'progress_store.dart';
+import 'sentence_challenges.dart';
 
 enum StepKind {
   /// Meet the word: definition, what it replaces, example.
@@ -28,6 +29,7 @@ class SessionStep {
     this.isReview = false,
     this.options = const [],
     this.isRetry = false,
+    this.challenge,
   });
 
   final StepKind kind;
@@ -36,12 +38,16 @@ class SessionStep {
   final List<Word> options;
   final bool isRetry;
 
+  /// The constraint for a [StepKind.sentence] step.
+  final SentenceChallenge? challenge;
+
   SessionStep retry() => SessionStep(
     kind,
     word,
     isReview: isReview,
     options: options,
     isRetry: true,
+    challenge: challenge,
   );
 }
 
@@ -72,16 +78,54 @@ List<SessionStep> buildSession(
   Random? random,
 }) {
   final rng = random ?? Random();
+  SessionStep step(StepKind kind, Word w, {bool isReview = false}) =>
+      SessionStep(
+        kind,
+        w,
+        isReview: isReview,
+        challenge: kind == StepKind.sentence
+            ? pickChallenge(
+                w,
+                _progressOf(reviews, w)?.challengesDone ?? const [],
+                random: rng,
+              )
+            : null,
+      );
   List<Word> shuffled() => [...newWords]..shuffle(rng);
 
   return [
     for (final p in reviews)
-      SessionStep(reviewKindFor(p.level), p.word, isReview: true),
+      step(reviewKindFor(p.level), p.word, isReview: true),
     for (final w in newWords) SessionStep(StepKind.learn, w),
     for (final w in shuffled())
       SessionStep(StepKind.choose, w, options: _optionsFor(w, newWords, rng)),
     for (final w in shuffled()) SessionStep(StepKind.cloze, w),
     for (final w in shuffled()) SessionStep(StepKind.recall, w),
-    for (final w in newWords) SessionStep(StepKind.sentence, w),
+    for (final w in newWords) step(StepKind.sentence, w),
+  ];
+}
+
+WordProgress? _progressOf(List<WordProgress> reviews, Word w) {
+  for (final p in reviews) {
+    if (p.id == w.id) return p;
+  }
+  return null;
+}
+
+/// Extra practice: one production exercise per word, in a random style.
+List<SessionStep> buildPractice(List<WordProgress> words, {Random? random}) {
+  final rng = random ?? Random();
+  const kinds = [StepKind.cloze, StepKind.recall, StepKind.sentence];
+  return [
+    for (final p in words)
+      if (kinds[rng.nextInt(kinds.length)] case final kind)
+        SessionStep(
+          kind,
+          p.word,
+          isReview: true,
+          challenge: kind == StepKind.sentence
+              ? pickChallenge(p.word, p.challengesDone, random: rng)
+              : null,
+        ),
   ];
 }

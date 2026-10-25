@@ -2,8 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../models/word.dart';
 import '../services/answer_check.dart';
+import '../services/sentence_challenges.dart';
+import '../services/sentence_grader.dart';
 
-typedef OnAnswered = void Function(bool passed, {String? sentence});
+typedef OnAnswered = void Function(
+  bool passed, {
+  String? sentence,
+  String? challengeId,
+});
 
 /// Bottom panel shown after an answer is checked.
 class FeedbackPanel extends StatelessWidget {
@@ -379,25 +385,42 @@ class _TypeStepViewState extends State<TypeStepView> {
   }
 }
 
-/// The step that matters most: using the word in a sentence of your own.
+/// The step that matters most: using the word in a sentence of your own,
+/// under a challenge that changes each time, then checking it is right.
 class SentenceStepView extends StatefulWidget {
   const SentenceStepView({
     super.key,
     required this.word,
+    required this.challenge,
     required this.onAnswered,
+    this.earlierSentences = const [],
+    this.grader,
   });
 
   final Word word;
+  final SentenceChallenge challenge;
   final OnAnswered onAnswered;
+
+  /// Sentences already written with this word, which must not be repeated.
+  final List<String> earlierSentences;
+
+  /// Checks meaning with Claude when set; otherwise the user self-checks.
+  final SentenceGrader? grader;
 
   @override
   State<SentenceStepView> createState() => _SentenceStepViewState();
 }
 
+enum _Phase { writing, checking, selfCheck, done }
+
 class _SentenceStepViewState extends State<SentenceStepView> {
   final controller = TextEditingController();
+  _Phase phase = _Phase.writing;
   String? error;
-  bool? submitted;
+  String? note;
+  bool passed = false;
+  String title = '';
+  String? detail;
 
   @override
   void dispose() {
@@ -405,76 +428,191 @@ class _SentenceStepViewState extends State<SentenceStepView> {
     super.dispose();
   }
 
-  void submit() {
-    final s = controller.text.trim();
-    if (!sentenceUsesWord(s, widget.word)) {
-      setState(
-        () => error =
-            'Use "${widget.word.word}" (or a form of it) in your sentence.',
-      );
+  String get sentence => controller.text.trim();
+
+  String? localProblem(String s) {
+    final w = widget.word;
+    if (!sentenceUsesWord(s, w)) {
+      return 'Use "${w.word}" (or a form of it) in your sentence.';
+    }
+    if (wordCount(s) < 5) return 'Make it a full sentence, at least 5 words.';
+    if (similarity(s, w.example) >= 0.6) {
+      return 'That is too close to the example. Make it your own.';
+    }
+    final repeat = tooSimilarTo(s, widget.earlierSentences);
+    if (repeat != null) {
+      return 'Too close to one you already wrote: "$repeat". Try a new idea.';
+    }
+    return widget.challenge.check?.call(s);
+  }
+
+  Future<void> submit() async {
+    final problem = localProblem(sentence);
+    if (problem != null) {
+      setState(() => error = problem);
       return;
     }
-    if (wordCount(s) < 5) {
-      setState(() => error = 'Make it a full sentence, at least 5 words.');
+    final grader = widget.grader;
+    if (grader == null) {
+      setState(() {
+        error = null;
+        phase = _Phase.selfCheck;
+      });
       return;
     }
     setState(() {
       error = null;
-      submitted = true;
+      phase = _Phase.checking;
     });
+    try {
+      final r = await grader.grade(widget.word, widget.challenge, sentence);
+      if (!mounted) return;
+      final polished = r.betterSentence.trim() != sentence;
+      finish(
+        r.passed,
+        switch (r.verdict) {
+          UsageVerdict.correct => 'Nice. That works.',
+          UsageVerdict.almost => 'Almost. Right meaning.',
+          UsageVerdict.incorrect => 'Not quite. This word will come back.',
+        },
+        [
+          r.feedback,
+          if (polished)
+            '${r.passed ? 'Even smoother' : 'Better'}: "${r.betterSentence}"',
+        ].join('\n\n'),
+      );
+    } on GradeException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        note = '${e.message} Check it yourself this time.';
+        phase = _Phase.selfCheck;
+      });
+    }
   }
+
+  void finish(bool ok, String t, String? d) => setState(() {
+    passed = ok;
+    title = t;
+    detail = d;
+    phase = _Phase.done;
+  });
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final done = submitted;
+    final scheme = Theme.of(context).colorScheme;
+    final w = widget.word;
     return _Scaffold(
       label: 'Use it yourself',
-      bottom: done == null
-          ? Row(
+      bottom: switch (phase) {
+        _Phase.writing => Row(
+          children: [
+            TextButton(
+              onPressed: () => finish(
+                false,
+                'Here is one to borrow. You will get this again.',
+                w.example,
+              ),
+              child: const Text("I'm stuck"),
+            ),
+            const Spacer(),
+            FilledButton(onPressed: submit, child: const Text('Check')),
+          ],
+        ),
+        _Phase.checking => const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox.square(
+              dimension: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Text('Checking your sentence…'),
+          ],
+        ),
+        _Phase.selfCheck => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Does your sentence use "${w.word}" to mean: ${w.definition}?',
+              style: text.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            Row(
               children: [
-                TextButton(
-                  onPressed: () => setState(() => submitted = false),
-                  child: const Text("I'm stuck"),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => finish(
+                      false,
+                      'Good catch. Compare it with this one.',
+                      w.example,
+                    ),
+                    child: const Text('Not quite'),
+                  ),
                 ),
-                const Spacer(),
-                FilledButton(
-                  onPressed: submit,
-                  child: const Text('Save sentence'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => finish(
+                      true,
+                      'Saved to your notes.',
+                      'Now say it out loud. Can you use it for real today?',
+                    ),
+                    child: const Text('Yes, it fits'),
+                  ),
                 ),
               ],
-            )
-          : FeedbackPanel(
-              passed: done,
-              title: done
-                  ? 'Saved to your notes.'
-                  : 'Here is one to borrow. You will get this again.',
-              detail: done
-                  ? 'Now say it out loud. Can you use it in a real conversation today?'
-                  : widget.word.example,
-              onContinue: () => widget.onAnswered(
-                done,
-                sentence: done ? controller.text.trim() : null,
-              ),
             ),
+          ],
+        ),
+        _Phase.done => FeedbackPanel(
+          passed: passed,
+          title: title,
+          detail: detail,
+          onContinue: () => widget.onAnswered(
+            passed,
+            sentence: passed ? sentence : null,
+            challengeId: passed ? widget.challenge.id : null,
+          ),
+        ),
+      },
       children: [
         Text('Write a sentence with', style: text.titleMedium),
         Text(
-          widget.word.word,
+          w.word,
           style: text.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 4),
-        Text(widget.word.definition, style: text.bodyLarge),
+        Text(w.definition, style: text.bodyLarge),
         const SizedBox(height: 16),
-        Text(
-          'Make it about your own life: something you could actually say or '
-          'write this week.',
-          style: text.bodyMedium,
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: scheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.flag_outlined, color: scheme.onSecondaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  widget.challenge.prompt,
+                  style: text.titleSmall?.copyWith(
+                    color: scheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: controller,
-          enabled: done == null,
+          enabled: phase == _Phase.writing,
           minLines: 3,
           maxLines: 5,
           textCapitalization: TextCapitalization.sentences,
@@ -482,8 +620,13 @@ class _SentenceStepViewState extends State<SentenceStepView> {
             border: const OutlineInputBorder(),
             hintText: 'Your sentence…',
             errorText: error,
+            errorMaxLines: 3,
           ),
         ),
+        if (note != null) ...[
+          const SizedBox(height: 8),
+          Text(note!, style: text.bodySmall),
+        ],
       ],
     );
   }

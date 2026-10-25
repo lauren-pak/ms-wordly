@@ -43,5 +43,23 @@ void main() {
     await tester.tap(find.text('I used it').first);
     await tester.pumpAndSettle();
     expect(store.usedInLifeCount, 1);
+
+    // Extra practice after the daily session.
+    await tester.ensureVisible(find.text('Practice'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Practice'));
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 40; i++) {
+      if (find.text('Back home').evaluate().isNotEmpty) break;
+      for (final label in ['Continue', "I don't know", "I'm stuck"]) {
+        if (find.text(label).evaluate().isNotEmpty) {
+          await tester.tap(find.text(label));
+          break;
+        }
+      }
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Back home'), findsOneWidget);
+    expect(store.currentStreak, 1);
   });
 }
