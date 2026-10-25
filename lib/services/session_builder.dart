@@ -2,6 +2,7 @@ import 'dart:math';
 
 import '../data/word_bank.dart';
 import '../models/word.dart';
+import 'answer_check.dart';
 import 'progress_store.dart';
 import 'sentence_challenges.dart';
 
@@ -20,6 +21,15 @@ enum StepKind {
 
   /// Write your own sentence with the word.
   sentence,
+
+  /// Type the word that upgrades one of its plain alternatives.
+  swap,
+
+  /// Fill the word back into a sentence you wrote earlier.
+  own,
+
+  /// Match several words to their meanings.
+  match,
 }
 
 class SessionStep {
@@ -30,6 +40,9 @@ class SessionStep {
     this.options = const [],
     this.isRetry = false,
     this.challenge,
+    this.variant = 0,
+    this.ownSentence,
+    this.matchWords = const [],
   });
 
   final StepKind kind;
@@ -41,6 +54,22 @@ class SessionStep {
   /// The constraint for a [StepKind.sentence] step.
   final SentenceChallenge? challenge;
 
+  /// Which plain alternative a [StepKind.swap] step uses.
+  final int variant;
+
+  /// The user's earlier sentence for a [StepKind.own] step.
+  final String? ownSentence;
+
+  /// The words in a [StepKind.match] step.
+  final List<Word> matchWords;
+
+  /// Identifies this exercise, so recent ones aren't repeated.
+  String get key => switch (kind) {
+    StepKind.swap => 'swap:$variant',
+    StepKind.own => 'own:${ownSentence.hashCode}',
+    _ => kind.name,
+  };
+
   SessionStep retry() => SessionStep(
     kind,
     word,
@@ -48,16 +77,46 @@ class SessionStep {
     options: options,
     isRetry: true,
     challenge: challenge,
+    variant: variant,
+    ownSentence: ownSentence,
+    matchWords: matchWords,
   );
 }
 
-/// Review exercises rotate as a word levels up, so each review asks for
-/// the word in a different way.
-StepKind reviewKindFor(int level) => switch (level % 3) {
-  1 => StepKind.cloze,
-  2 => StepKind.recall,
-  _ => StepKind.sentence,
-};
+/// Number of recent exercises per word that won't be repeated.
+const recentLimit = 6;
+
+/// Every production exercise available for a learned word.
+List<SessionStep> exercisesFor(WordProgress p, Random rng) {
+  final w = p.word;
+  return [
+    SessionStep(StepKind.cloze, w, isReview: true),
+    SessionStep(StepKind.recall, w, isReview: true),
+    for (var i = 0; i < w.insteadOf.length; i++)
+      SessionStep(StepKind.swap, w, isReview: true, variant: i),
+    for (final s in p.sentences.toSet())
+      if (blankWord(s, w) != null)
+        SessionStep(StepKind.own, w, isReview: true, ownSentence: s),
+    SessionStep(
+      StepKind.sentence,
+      w,
+      isReview: true,
+      challenge: pickChallenge(w, p.challengesDone, random: rng),
+    ),
+  ];
+}
+
+/// Picks an exercise the user hasn't seen recently for this word. Each kind
+/// of exercise is equally likely, however many variants it has.
+SessionStep pickExercise(WordProgress p, Random rng) {
+  final all = exercisesFor(p, rng);
+  final fresh = all.where((e) => !p.recentExercises.contains(e.key)).toList();
+  final pool = fresh.isEmpty ? all : fresh;
+  final kinds = pool.map((e) => e.kind).toSet().toList();
+  final kind = kinds[rng.nextInt(kinds.length)];
+  final ofKind = pool.where((e) => e.kind == kind).toList();
+  return ofKind[rng.nextInt(ofKind.length)];
+}
 
 List<Word> _optionsFor(Word word, List<Word> pool, Random rng) {
   final distractors = pool.where((w) => w.id != word.id).toList()..shuffle(rng);
@@ -78,54 +137,44 @@ List<SessionStep> buildSession(
   Random? random,
 }) {
   final rng = random ?? Random();
-  SessionStep step(StepKind kind, Word w, {bool isReview = false}) =>
-      SessionStep(
-        kind,
-        w,
-        isReview: isReview,
-        challenge: kind == StepKind.sentence
-            ? pickChallenge(
-                w,
-                _progressOf(reviews, w)?.challengesDone ?? const [],
-                random: rng,
-              )
-            : null,
-      );
   List<Word> shuffled() => [...newWords]..shuffle(rng);
 
   return [
-    for (final p in reviews)
-      step(reviewKindFor(p.level), p.word, isReview: true),
+    for (final p in reviews) pickExercise(p, rng),
     for (final w in newWords) SessionStep(StepKind.learn, w),
     for (final w in shuffled())
       SessionStep(StepKind.choose, w, options: _optionsFor(w, newWords, rng)),
     for (final w in shuffled()) SessionStep(StepKind.cloze, w),
     for (final w in shuffled()) SessionStep(StepKind.recall, w),
-    for (final w in newWords) step(StepKind.sentence, w),
+    for (final w in newWords)
+      SessionStep(
+        StepKind.sentence,
+        w,
+        challenge: pickChallenge(w, const [], random: rng),
+      ),
   ];
 }
 
-WordProgress? _progressOf(List<WordProgress> reviews, Word w) {
-  for (final p in reviews) {
-    if (p.id == w.id) return p;
-  }
-  return null;
-}
-
-/// Extra practice: one production exercise per word, in a random style.
-List<SessionStep> buildPractice(List<WordProgress> words, {Random? random}) {
+/// Extra practice: a matching warm-up, then one exercise per word that
+/// avoids what the user has done with it recently.
+List<SessionStep> buildPractice(
+  List<WordProgress> words, {
+  List<WordProgress> learned = const [],
+  Random? random,
+}) {
   final rng = random ?? Random();
-  const kinds = [StepKind.cloze, StepKind.recall, StepKind.sentence];
+  final matchPool = <Word>{
+    ...words.map((p) => p.word),
+    ...(learned.map((p) => p.word).toList()..shuffle(rng)),
+  }.take(4).toList();
   return [
-    for (final p in words)
-      if (kinds[rng.nextInt(kinds.length)] case final kind)
-        SessionStep(
-          kind,
-          p.word,
-          isReview: true,
-          challenge: kind == StepKind.sentence
-              ? pickChallenge(p.word, p.challengesDone, random: rng)
-              : null,
-        ),
+    if (matchPool.length == 4)
+      SessionStep(
+        StepKind.match,
+        matchPool.first,
+        isReview: true,
+        matchWords: matchPool,
+      ),
+    for (final p in words) pickExercise(p, rng),
   ];
 }

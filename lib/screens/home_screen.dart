@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/progress_store.dart';
+import '../widgets/difficulty_picker.dart';
 import '../widgets/mascot.dart';
 import 'closet_screen.dart';
 import 'session_screen.dart';
@@ -198,7 +199,13 @@ class _TodayCard extends StatelessWidget {
                   ? 'All caught up. Check in to keep your streak.'
                   : '${parts.join(' · ')} · about 5 minutes',
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            ActionChip(
+              avatar: const Icon(Icons.tune, size: 18),
+              label: Text('Level: ${difficultyLabel(store.difficulty)}'),
+              onPressed: () => showDifficultyPicker(context, store),
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(

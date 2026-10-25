@@ -157,4 +157,46 @@ void main() {
       expect(find.textContaining("Couldn't reach"), findsOneWidget);
     });
   });
+
+  testWidgets('match pairs reports slips', (tester) async {
+    final words = [
+      'candid',
+      'concise',
+      'frugal',
+      'wary',
+    ].map((id) => wordsById[id]!).toList();
+    bool? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MatchStepView(
+            words: words,
+            onAnswered: (passed, {sentence, challengeId}) => result = passed,
+          ),
+        ),
+      ),
+    );
+    Future<void> pair(Word w, Word d) async {
+      await tester.tap(find.text(w.word));
+      await tester.pump();
+      await tester.tap(find.text(d.definition));
+      await tester.pump();
+    }
+
+    await pair(words[0], words[1]); // a slip
+    for (final w in words) {
+      await pair(w, w);
+    }
+    expect(find.textContaining('1 slip'), findsOneWidget);
+    await tester.tap(find.text('Continue'));
+    expect(result, isFalse);
+  });
+
+  test('blanks the word in your own sentence', () {
+    expect(blankWord('We Mitigated it fast.', mitigate), (
+      'We ___ it fast.',
+      'mitigated',
+    ));
+    expect(blankWord('Nothing here.', mitigate), isNull);
+  });
 }

@@ -81,3 +81,15 @@ String? tooSimilarTo(String sentence, Iterable<String> earlier) {
   }
   return null;
 }
+
+/// Blanks out the word in [sentence], returning the blanked sentence and the
+/// exact form that was removed, or null if the word isn't in it.
+(String, String)? blankWord(String sentence, Word word) {
+  for (final m in RegExp(r"[A-Za-z\-']+").allMatches(sentence)) {
+    final token = m.group(0)!.toLowerCase();
+    if (word.forms.contains(token)) {
+      return (sentence.replaceRange(m.start, m.end, '___'), token);
+    }
+  }
+  return null;
+}

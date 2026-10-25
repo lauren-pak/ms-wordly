@@ -1,7 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ms_wordly/data/word_bank.dart';
+import 'package:ms_wordly/models/word.dart';
 
 void main() {
+  test('every difficulty has plenty of words', () {
+    for (final d in Difficulty.values) {
+      expect(wordsAt(d).length, greaterThanOrEqualTo(30), reason: d.name);
+    }
+    expect(wordsAt(null), wordBank);
+  });
+
   test('word ids are unique', () {
     expect(wordsById.length, wordBank.length);
   });

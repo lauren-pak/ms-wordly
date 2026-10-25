@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/word_bank.dart';
 import '../models/word.dart';
 import 'rewards.dart';
+import 'session_builder.dart' show recentLimit;
 
 const int wordsPerDay = 3;
 const int maxReviewsPerDay = 12;
@@ -41,8 +42,10 @@ class WordProgress {
     this.lastUsedOn,
     List<String>? sentences,
     List<String>? challengesDone,
+    List<String>? recentExercises,
   }) : sentences = sentences ?? [],
-       challengesDone = challengesDone ?? [];
+       challengesDone = challengesDone ?? [],
+       recentExercises = recentExercises ?? [];
 
   final String id;
   final String learnedOn;
@@ -56,6 +59,9 @@ class WordProgress {
 
   /// Sentence challenge ids already completed, so new ones rotate in.
   final List<String> challengesDone;
+
+  /// Keys of the latest exercises done with this word, newest last.
+  final List<String> recentExercises;
 
   bool get mastered => level >= masteredLevel;
   Word get word => wordsById[id]!;
@@ -71,6 +77,7 @@ class WordProgress {
     'lastUsedOn': lastUsedOn,
     'sentences': sentences,
     'challengesDone': challengesDone,
+    'recentExercises': recentExercises,
   };
 
   factory WordProgress.fromJson(Map<String, dynamic> j) => WordProgress(
@@ -84,6 +91,7 @@ class WordProgress {
     lastUsedOn: j['lastUsedOn'] as String?,
     sentences: (j['sentences'] as List?)?.cast<String>(),
     challengesDone: (j['challengesDone'] as List?)?.cast<String>(),
+    recentExercises: (j['recentExercises'] as List?)?.cast<String>(),
   );
 }
 
@@ -107,6 +115,9 @@ class ProgressStore extends ChangeNotifier {
   String? lastCompleted;
   String? planDate;
   List<String> planWordIds = [];
+
+  /// Difficulty of new words; null mixes all levels.
+  Difficulty? difficulty = Difficulty.stretch;
 
   // Rewards: points, the mascot's closet, achievements, and activity counts.
   int points = 0;
@@ -141,6 +152,10 @@ class ProgressStore extends ChangeNotifier {
     lastCompleted = j['lastCompleted'] as String?;
     planDate = j['planDate'] as String?;
     planWordIds = (j['planWordIds'] as List).cast<String>();
+    final d = j['difficulty'] as String?;
+    if (j.containsKey('difficulty')) {
+      difficulty = d == null ? null : Difficulty.values.byName(d);
+    }
     final r = j['rewards'] as Map<String, dynamic>?;
     if (r == null) return;
     points = r['points'] as int;
@@ -174,6 +189,7 @@ class ProgressStore extends ChangeNotifier {
         'lastCompleted': lastCompleted,
         'planDate': planDate,
         'planWordIds': planWordIds,
+        'difficulty': difficulty?.name,
         'rewards': {
           'points': points,
           'mascotName': mascotName,
@@ -208,12 +224,30 @@ class ProgressStore extends ChangeNotifier {
   void _ensurePlan() {
     if (planDate == today) return;
     planDate = today;
-    planWordIds = wordBank
-        .where((w) => !progress.containsKey(w.id))
+    planWordIds = _unlearned(const {})
         .take(wordsPerDay)
         .map((w) => w.id)
         .toList();
     _persist();
+  }
+
+  /// Unlearned words at the chosen difficulty, then any others once those
+  /// run out.
+  Iterable<Word> _unlearned(Set<String> exclude) {
+    bool fresh(Word w) =>
+        !progress.containsKey(w.id) && !exclude.contains(w.id);
+    return [
+      ...wordsAt(difficulty).where(fresh),
+      ...wordBank.where((w) => w.difficulty != difficulty && fresh(w)),
+    ];
+  }
+
+  /// Changes the difficulty of new words. Today's words are re-picked if
+  /// today's session hasn't been finished yet.
+  Future<void> setDifficulty(Difficulty? d) async {
+    difficulty = d;
+    if (!doneToday) planDate = null;
+    await _save();
   }
 
   List<WordProgress> get dueReviews {
@@ -231,13 +265,7 @@ class ProgressStore extends ChangeNotifier {
   /// Words beyond today's plan, for learning more after the daily session.
   List<Word> nextNewWords([int count = wordsPerDay]) {
     _ensurePlan();
-    return wordBank
-        .where(
-          (w) => !progress.containsKey(w.id) && !planWordIds.contains(w.id),
-        )
-        .take(count)
-        .map((w) => w)
-        .toList();
+    return _unlearned(planWordIds.toSet()).take(count).toList();
   }
 
   List<Word> get learnedToday => progress.values
@@ -272,6 +300,7 @@ class ProgressStore extends ChangeNotifier {
     required Map<String, bool> reviewResults,
     Map<String, List<String>> sentences = const {},
     Map<String, List<String>> challenges = const {},
+    Map<String, List<String>> exercises = const {},
   }) async {
     final t = today;
     for (final e in newWordResults.entries) {
@@ -298,12 +327,7 @@ class ProgressStore extends ChangeNotifier {
         p.due = addDays(t, 1);
       }
     }
-    for (final e in sentences.entries) {
-      progress[e.key]?.sentences.addAll(e.value.map((s) => s.trim()));
-    }
-    for (final e in challenges.entries) {
-      progress[e.key]?.challengesDone.addAll(e.value);
-    }
+    _recordWork(sentences, challenges, exercises);
     final int earned;
     if (!completedDays.contains(t)) {
       completedDays.add(t);
@@ -328,6 +352,7 @@ class ProgressStore extends ChangeNotifier {
     required Map<String, bool> results,
     Map<String, List<String>> sentences = const {},
     Map<String, List<String>> challenges = const {},
+    Map<String, List<String>> exercises = const {},
   }) async {
     final tomorrow = addDays(today, 1);
     for (final e in results.entries) {
@@ -340,15 +365,31 @@ class ProgressStore extends ChangeNotifier {
         if (p.due.compareTo(tomorrow) > 0) p.due = tomorrow;
       }
     }
+    _recordWork(sentences, challenges, exercises);
+    practiceRounds++;
+    lastReward = _award(practicePoints);
+    await _save();
+  }
+
+  void _recordWork(
+    Map<String, List<String>> sentences,
+    Map<String, List<String>> challenges,
+    Map<String, List<String>> exercises,
+  ) {
     for (final e in sentences.entries) {
       progress[e.key]?.sentences.addAll(e.value.map((s) => s.trim()));
     }
     for (final e in challenges.entries) {
       progress[e.key]?.challengesDone.addAll(e.value);
     }
-    practiceRounds++;
-    lastReward = _award(practicePoints);
-    await _save();
+    for (final e in exercises.entries) {
+      final recent = progress[e.key]?.recentExercises;
+      if (recent == null) continue;
+      recent.addAll(e.value);
+      if (recent.length > recentLimit) {
+        recent.removeRange(0, recent.length - recentLimit);
+      }
+    }
   }
 
   /// Using a word in real life is the best signal it is active vocabulary.

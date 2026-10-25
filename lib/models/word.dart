@@ -1,3 +1,13 @@
+enum Difficulty {
+  everyday('Everyday', 'Common words that instantly sharpen how you sound'),
+  stretch('Stretch', 'Polished words for work, writing, and good conversation'),
+  advanced('Advanced', 'Rarer, precise words for when you want to impress');
+
+  const Difficulty(this.label, this.description);
+  final String label;
+  final String description;
+}
+
 /// A vocabulary word with everything the exercises need.
 class Word {
   const Word({
@@ -9,6 +19,7 @@ class Word {
     required this.cloze,
     required this.clozeAnswer,
     required this.forms,
+    this.difficulty = Difficulty.stretch,
   });
 
   final String word;
@@ -25,6 +36,8 @@ class Word {
 
   /// Every accepted inflection, used to check typed answers and sentences.
   final List<String> forms;
+
+  final Difficulty difficulty;
 
   String get id => word;
 }

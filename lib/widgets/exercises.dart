@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../models/word.dart';
@@ -258,18 +260,85 @@ class _ChooseStepViewState extends State<ChooseStepView> {
   }
 }
 
-/// Typed recall: either fill in a sentence or produce the word from its
-/// definition. Typing (not picking) is what builds active recall.
+/// What a typed exercise shows and expects.
+class TypePrompt {
+  const TypePrompt({
+    required this.label,
+    required this.body,
+    required this.target,
+    required this.detail,
+    this.lead,
+    this.note,
+    this.exact = false,
+  });
+
+  /// Fill in [Word.cloze].
+  factory TypePrompt.cloze(Word w) => TypePrompt(
+    label: 'Fill in the blank',
+    body: w.cloze,
+    target: w.clozeAnswer,
+    exact: true,
+    detail: w.cloze.replaceFirst('___', w.clozeAnswer),
+  );
+
+  /// Produce the word from its definition.
+  factory TypePrompt.recall(Word w) => TypePrompt(
+    label: 'Recall the word',
+    lead: 'Which word means:',
+    body: w.definition,
+    note: '(${w.partOfSpeech})',
+    target: w.word,
+    detail: w.example,
+  );
+
+  /// Produce the word that upgrades one of its plain alternatives.
+  factory TypePrompt.swap(Word w, int variant) => TypePrompt(
+    label: 'Upgrade the phrase',
+    lead: 'Type a word you learned that could replace',
+    body: '"${w.insteadOf[variant % w.insteadOf.length]}"',
+    note: '(${w.partOfSpeech})',
+    target: w.word,
+    detail: w.example,
+  );
+
+  /// Fill the word back into a sentence the user wrote, if it contains it.
+  static TypePrompt? own(Word w, String sentence) {
+    final blank = blankWord(sentence, w);
+    if (blank == null) return null;
+    return TypePrompt(
+      label: 'Your own sentence',
+      lead: 'Fill in the word in a sentence you wrote:',
+      body: blank.$1,
+      target: blank.$2,
+      exact: true,
+      detail: sentence,
+    );
+  }
+
+  final String label;
+  final String? lead;
+  final String body;
+  final String? note;
+  final String target;
+
+  /// Whether only [target] counts, rather than any form of the word.
+  final bool exact;
+
+  /// Shown after answering: the full sentence or an example.
+  final String detail;
+}
+
+/// Typed recall. Typing (not picking) is what builds active recall.
 class TypeStepView extends StatefulWidget {
   const TypeStepView({
     super.key,
     required this.word,
-    required this.fromDefinition,
+    required this.prompt,
     required this.onAnswered,
   });
 
   final Word word;
-  final bool fromDefinition;
+  final TypePrompt prompt;
   final OnAnswered onAnswered;
 
   @override
@@ -287,8 +356,7 @@ class _TypeStepViewState extends State<TypeStepView> {
     super.dispose();
   }
 
-  String get target =>
-      widget.fromDefinition ? widget.word.word : widget.word.clozeAnswer;
+  String get target => widget.prompt.target;
 
   void check() {
     if (controller.text.trim().isEmpty) return;
@@ -296,7 +364,7 @@ class _TypeStepViewState extends State<TypeStepView> {
       () => verdict = checkTyped(
         controller.text,
         widget.word,
-        exact: widget.fromDefinition ? null : widget.word.clozeAnswer,
+        exact: widget.prompt.exact ? target : null,
       ),
     );
   }
@@ -306,9 +374,10 @@ class _TypeStepViewState extends State<TypeStepView> {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final prompt = widget.prompt;
     final v = verdict;
     return _Scaffold(
-      label: widget.fromDefinition ? 'Recall the word' : 'Fill in the blank',
+      label: prompt.label,
       bottom: v == null
           ? Row(
               children: [
@@ -328,29 +397,25 @@ class _TypeStepViewState extends State<TypeStepView> {
                 Verdict.wrongForm => 'Right word. Here it\'s "$target".',
                 Verdict.wrong => 'The answer is "$target".',
               },
-              detail: widget.fromDefinition
-                  ? widget.word.example
-                  : widget.word.cloze.replaceFirst('___', target),
+              detail: prompt.detail,
               onContinue: () => widget.onAnswered(v.passed),
             ),
       children: [
-        if (widget.fromDefinition) ...[
-          Text('Which word means:', style: text.titleMedium),
+        if (prompt.lead != null) ...[
+          Text(prompt.lead!, style: text.titleMedium),
+          const SizedBox(height: 8),
+        ],
+        Text(
+          prompt.body,
+          style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        if (prompt.note != null) ...[
           const SizedBox(height: 8),
           Text(
-            widget.word.definition,
-            style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '(${widget.word.partOfSpeech})',
+            prompt.note!,
             style: text.bodyMedium?.copyWith(fontStyle: FontStyle.italic),
           ),
-        ] else
-          Text(
-            widget.word.cloze,
-            style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
-          ),
+        ],
         const SizedBox(height: 20),
         TextField(
           controller: controller,
@@ -385,6 +450,107 @@ class _TypeStepViewState extends State<TypeStepView> {
   }
 }
 
+/// Match several words to their meanings by tapping pairs.
+class MatchStepView extends StatefulWidget {
+  const MatchStepView({
+    super.key,
+    required this.words,
+    required this.onAnswered,
+    this.seed = 0,
+  });
+
+  final List<Word> words;
+  final OnAnswered onAnswered;
+  final int seed;
+
+  @override
+  State<MatchStepView> createState() => _MatchStepViewState();
+}
+
+class _MatchStepViewState extends State<MatchStepView> {
+  late final List<Word> definitions = [...widget.words]
+    ..shuffle(Random(widget.seed));
+  final Set<String> matched = {};
+  String? selected;
+  String? wrongPair;
+  int mistakes = 0;
+
+  void tapDefinition(Word d) {
+    final s = selected;
+    if (s == null || matched.contains(d.id)) return;
+    setState(() {
+      if (s == d.id) {
+        matched.add(d.id);
+        wrongPair = null;
+      } else {
+        mistakes++;
+        wrongPair = d.id;
+      }
+      selected = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final done = matched.length == widget.words.length;
+    return _Scaffold(
+      label: 'Match them up',
+      bottom: done
+          ? FeedbackPanel(
+              passed: mistakes == 0,
+              title: mistakes == 0
+                  ? 'Perfect match!'
+                  : 'All matched, with $mistakes slip${mistakes == 1 ? '' : 's'}.',
+              onContinue: () => widget.onAnswered(mistakes == 0),
+            )
+          : null,
+      children: [
+        Text('Tap a word, then its meaning.', style: text.titleMedium),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final w in widget.words)
+              ChoiceChip(
+                label: Text(w.word, style: const TextStyle(fontSize: 16)),
+                selected: selected == w.id,
+                onSelected: matched.contains(w.id)
+                    ? null
+                    : (_) => setState(() => selected = w.id),
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        for (final d in definitions)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.all(14),
+                disabledForegroundColor: scheme.onSurface,
+                backgroundColor: matched.contains(d.id)
+                    ? scheme.primaryContainer
+                    : wrongPair == d.id
+                    ? scheme.errorContainer
+                    : null,
+              ),
+              onPressed: matched.contains(d.id) ? null : () => tapDefinition(d),
+              child: Text(
+                matched.contains(d.id)
+                    ? '${d.word}: ${d.definition}'
+                    : d.definition,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// The step that matters most: using the word in a sentence of your own,
 /// under a challenge that changes each time, then checking it is right.
 class SentenceStepView extends StatefulWidget {
@@ -395,10 +561,14 @@ class SentenceStepView extends StatefulWidget {
     required this.onAnswered,
     this.earlierSentences = const [],
     this.grader,
+    this.onEnableAi,
   });
 
   final Word word;
   final SentenceChallenge challenge;
+
+  /// Opens settings to add an API key, shown when there is no [grader].
+  final VoidCallback? onEnableAi;
   final OnAnswered onAnswered;
 
   /// Sentences already written with this word, which must not be repeated.
@@ -627,6 +797,28 @@ class _SentenceStepViewState extends State<SentenceStepView> {
           const SizedBox(height: 8),
           Text(note!, style: text.bodySmall),
         ],
+        if (widget.grader == null &&
+            widget.onEnableAi != null &&
+            phase == _Phase.writing)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: widget.onEnableAi,
+              icon: const Icon(Icons.auto_awesome),
+              label: const Text('Turn on AI checking'),
+            ),
+          ),
+        if (widget.grader != null && phase == _Phase.writing)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome, size: 16, color: scheme.primary),
+                const SizedBox(width: 6),
+                Text('Claude will check this sentence', style: text.bodySmall),
+              ],
+            ),
+          ),
       ],
     );
   }

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../data/word_bank.dart';
 import '../services/progress_store.dart';
+import '../services/sentence_challenges.dart';
+import '../services/sentence_grader.dart';
+import '../widgets/difficulty_picker.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.store});
@@ -14,6 +18,30 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final controller = TextEditingController(text: widget.store.apiKey);
   bool obscure = true;
+  bool testing = false;
+
+  /// Saves the key and grades a sample sentence to prove it works.
+  Future<void> test() async {
+    await widget.store.setApiKey(controller.text);
+    final key = widget.store.apiKey;
+    if (key == null) return;
+    setState(() => testing = true);
+    String message;
+    try {
+      final r = await ClaudeSentenceGrader(key).grade(
+        wordsById['candid']!,
+        challengesFor(wordsById['candid']!).first,
+        'Can I be candid about why the plan worries me?',
+      );
+      message = 'It works! Claude says: ${r.feedback}';
+    } on GradeException catch (e) {
+      message = e.message;
+    }
+    if (!mounted) return;
+    setState(() => testing = false);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   void dispose() {
@@ -43,6 +71,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          Text('Word difficulty', style: text.titleLarge),
+          const SizedBox(height: 4),
+          DifficultyOptions(store: widget.store),
+          const Divider(height: 32),
           Text('Sentence checking', style: text.titleLarge),
           const SizedBox(height: 8),
           const Text(
@@ -52,8 +84,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Get a key at console.anthropic.com (API keys). Each check costs '
-            'well under a cent. The key is stored only on this device.',
+            'To get a key: sign in at console.anthropic.com, add a few '
+            'dollars of credit under Billing, then go to API keys and create '
+            'one. Each check costs well under a cent. The key is stored only '
+            'on this device.',
           ),
           const SizedBox(height: 16),
           TextField(
@@ -82,6 +116,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const Text('Remove'),
               ),
               const Spacer(),
+              OutlinedButton(
+                onPressed: testing ? null : test,
+                child: Text(testing ? 'Testing…' : 'Test key'),
+              ),
+              const SizedBox(width: 8),
               FilledButton(onPressed: save, child: const Text('Save')),
             ],
           ),

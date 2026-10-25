@@ -6,6 +6,7 @@ import '../services/sentence_grader.dart';
 import '../services/session_builder.dart';
 import '../widgets/exercises.dart';
 import 'done_screen.dart';
+import 'settings_screen.dart';
 
 enum SessionMode {
   /// Today's words plus due reviews. Finishing it keeps the streak.
@@ -40,10 +41,11 @@ class _SessionScreenState extends State<SessionScreen> {
   late final List<Word> newWords;
   late final List<SessionStep> queue;
   late final int plannedSteps;
-  late final SentenceGrader? grader;
+  late SentenceGrader? grader;
   final Set<String> missed = {};
   final Map<String, List<String>> sentences = {};
   final Map<String, List<String>> challenges = {};
+  final Map<String, List<String>> exercises = {};
   final Set<String> reviewIds = {};
   int index = 0;
   bool finishing = false;
@@ -68,7 +70,7 @@ class _SessionScreenState extends State<SessionScreen> {
         newWords = [];
         final words = store.practiceSet();
         reviewIds.addAll(words.map((r) => r.id));
-        queue = buildPractice(words);
+        queue = buildPractice(words, learned: store.progress.values.toList());
     }
     plannedSteps = queue.length;
     // Nothing due and no new words left: checking in still counts the day.
@@ -77,10 +79,25 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
+  SentenceGrader? _savedGrader() {
+    final key = store.apiKey;
+    return key == null ? null : ClaudeSentenceGrader(key);
+  }
+
+  Future<void> enableAi() async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => SettingsScreen(store: store)));
+    if (mounted) setState(() => grader = widget.grader ?? _savedGrader());
+  }
+
   void advance(bool passed, {String? sentence, String? challengeId}) {
     final step = queue[index];
+    final perWord = step.kind != StepKind.learn && step.kind != StepKind.match;
+    if (perWord && !step.isRetry && step.kind != StepKind.choose) {
+      exercises.putIfAbsent(step.word.id, () => []).add(step.key);
+    }
     if (!passed && step.kind != StepKind.learn) {
-      missed.add(step.word.id);
+      if (perWord) missed.add(step.word.id);
       // Missed exercises come back once at the end of the session.
       if (!step.isRetry) queue.add(step.retry());
     }
@@ -110,6 +127,7 @@ class _SessionScreenState extends State<SessionScreen> {
         results: {for (final id in reviewIds) id: !missed.contains(id)},
         sentences: sentences,
         challenges: challenges,
+        exercises: exercises,
       );
     } else {
       await store.completeSession(
@@ -119,6 +137,7 @@ class _SessionScreenState extends State<SessionScreen> {
         reviewResults: {for (final id in reviewIds) id: !missed.contains(id)},
         sentences: sentences,
         challenges: challenges,
+        exercises: exercises,
       );
     }
     if (!mounted) return;
@@ -176,16 +195,26 @@ class _SessionScreenState extends State<SessionScreen> {
               options: step.options,
               onAnswered: advance,
             ),
-            StepKind.cloze => TypeStepView(
+            StepKind.cloze ||
+            StepKind.recall ||
+            StepKind.swap ||
+            StepKind.own => TypeStepView(
               key: key,
               word: step.word,
-              fromDefinition: false,
+              prompt: switch (step.kind) {
+                StepKind.recall => TypePrompt.recall(step.word),
+                StepKind.swap => TypePrompt.swap(step.word, step.variant),
+                StepKind.own =>
+                  TypePrompt.own(step.word, step.ownSentence!) ??
+                      TypePrompt.cloze(step.word),
+                _ => TypePrompt.cloze(step.word),
+              },
               onAnswered: advance,
             ),
-            StepKind.recall => TypeStepView(
+            StepKind.match => MatchStepView(
               key: key,
-              word: step.word,
-              fromDefinition: true,
+              words: step.matchWords,
+              seed: index,
               onAnswered: advance,
             ),
             StepKind.sentence => SentenceStepView(
@@ -194,6 +223,7 @@ class _SessionScreenState extends State<SessionScreen> {
               challenge: step.challenge!,
               earlierSentences: earlierSentences(step.word),
               grader: grader,
+              onEnableAi: enableAi,
               onAnswered: advance,
             ),
           };
