@@ -40,11 +40,13 @@ void main() {
     await tester.tap(find.text('Back home'));
     await tester.pumpAndSettle();
     expect(find.text('Done for today'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('I used it').first, 100);
     await tester.tap(find.text('I used it').first);
     await tester.pumpAndSettle();
     expect(store.usedInLifeCount, 1);
 
     // Extra practice after the daily session.
+    await tester.scrollUntilVisible(find.text('Practice'), 100);
     await tester.ensureVisible(find.text('Practice'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Practice'));

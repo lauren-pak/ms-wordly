@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/word.dart';
 import '../services/progress_store.dart';
+import '../widgets/mascot.dart';
 
 class DoneScreen extends StatelessWidget {
   const DoneScreen({super.key, required this.store, required this.words});
@@ -13,13 +14,14 @@ class DoneScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final streak = store.currentStreak;
+    final reward = store.lastReward;
     return Scaffold(
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            const SizedBox(height: 24),
-            const Center(child: Text('🔥', style: TextStyle(fontSize: 88))),
+            Center(child: Mascot(size: 180, equipped: store.equipped)),
+            const Center(child: Text('🔥', style: TextStyle(fontSize: 36))),
             Center(
               child: Text(
                 '$streak day streak',
@@ -37,6 +39,30 @@ class DoneScreen extends StatelessWidget {
                 style: text.titleMedium,
               ),
             ),
+            if (reward != null) ...[
+              const SizedBox(height: 16),
+              Center(
+                child: Chip(
+                  avatar: const Text('⭐'),
+                  label: Text(
+                    '+${reward.points} points for ${store.mascotName}\'s closet',
+                    style: text.titleSmall,
+                  ),
+                ),
+              ),
+              for (final a in reward.unlocked)
+                Card(
+                  color: Theme.of(context).colorScheme.tertiaryContainer,
+                  child: ListTile(
+                    leading: Text(
+                      a.emoji,
+                      style: const TextStyle(fontSize: 28),
+                    ),
+                    title: Text('Achievement: ${a.title}'),
+                    subtitle: Text('${a.description} · +${a.points} ⭐'),
+                  ),
+                ),
+            ],
             if (words.isNotEmpty) ...[
               const SizedBox(height: 32),
               Text("Today's challenge", style: text.titleLarge),

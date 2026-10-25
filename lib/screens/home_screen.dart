@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../services/progress_store.dart';
+import '../widgets/mascot.dart';
+import 'closet_screen.dart';
 import 'session_screen.dart';
 import 'settings_screen.dart';
 import 'words_screen.dart';
@@ -72,6 +74,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _MascotCard(store: store),
+            const SizedBox(height: 12),
             _StreakCard(store: store),
             const SizedBox(height: 12),
             if (store.doneToday) ...[
@@ -348,6 +352,79 @@ class _KeepGoingCard extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MascotCard extends StatelessWidget {
+  const _MascotCard({required this.store});
+
+  final ProgressStore store;
+
+  String get line {
+    final streak = store.currentStreak;
+    if (store.doneToday) return 'We did it today! Want to keep going?';
+    if (streak > 0) return "Let's keep our $streak-day streak going!";
+    if (store.progress.isEmpty) {
+      return "Hi, I'm ${store.mascotName}! Let's learn some words.";
+    }
+    return "I missed you! Ready for today's words?";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    void openCloset() => Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => ClosetScreen(store: store)));
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: openCloset,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
+          child: Row(
+            children: [
+              Mascot(size: 120, equipped: store.equipped),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.secondaryContainer,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(4),
+                          topRight: Radius.circular(16),
+                          bottomLeft: Radius.circular(16),
+                          bottomRight: Radius.circular(16),
+                        ),
+                      ),
+                      child: Text(line, style: text.bodyMedium),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Text('⭐ ${store.points}', style: text.titleMedium),
+                        const Spacer(),
+                        FilledButton.tonal(
+                          onPressed: openCloset,
+                          child: const Text('Closet'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/word_bank.dart';
 import '../models/word.dart';
+import 'rewards.dart';
 
 const int wordsPerDay = 3;
 const int maxReviewsPerDay = 12;
@@ -107,6 +108,20 @@ class ProgressStore extends ChangeNotifier {
   String? planDate;
   List<String> planWordIds = [];
 
+  // Rewards: points, the mascot's closet, achievements, and activity counts.
+  int points = 0;
+  String mascotName = 'Lexi';
+  final Set<String> owned = {};
+  final Map<Slot, String> equipped = {};
+  final Set<String> unlocked = {};
+  int sessionsCompleted = 0;
+  int perfectSessions = 0;
+  int practiceRounds = 0;
+  int bonusRounds = 0;
+
+  /// What the most recent session earned, for the celebration screen.
+  Reward? lastReward;
+
   String get today => dayKey(_clock());
 
   static Future<ProgressStore> open() async =>
@@ -126,6 +141,21 @@ class ProgressStore extends ChangeNotifier {
     lastCompleted = j['lastCompleted'] as String?;
     planDate = j['planDate'] as String?;
     planWordIds = (j['planWordIds'] as List).cast<String>();
+    final r = j['rewards'] as Map<String, dynamic>?;
+    if (r == null) return;
+    points = r['points'] as int;
+    mascotName = r['mascotName'] as String;
+    owned.addAll((r['owned'] as List).cast<String>());
+    for (final e in (r['equipped'] as Map<String, dynamic>).entries) {
+      if (accessoriesById.containsKey(e.value)) {
+        equipped[Slot.values.byName(e.key)] = e.value as String;
+      }
+    }
+    unlocked.addAll((r['unlocked'] as List).cast<String>());
+    sessionsCompleted = r['sessionsCompleted'] as int;
+    perfectSessions = r['perfectSessions'] as int;
+    practiceRounds = r['practiceRounds'] as int;
+    bonusRounds = r['bonusRounds'] as int;
   }
 
   Future<void> _save() async {
@@ -144,6 +174,17 @@ class ProgressStore extends ChangeNotifier {
         'lastCompleted': lastCompleted,
         'planDate': planDate,
         'planWordIds': planWordIds,
+        'rewards': {
+          'points': points,
+          'mascotName': mascotName,
+          'owned': owned.toList(),
+          'equipped': {for (final e in equipped.entries) e.key.name: e.value},
+          'unlocked': unlocked.toList(),
+          'sessionsCompleted': sessionsCompleted,
+          'perfectSessions': perfectSessions,
+          'practiceRounds': practiceRounds,
+          'bonusRounds': bonusRounds,
+        },
       }),
     );
   }
@@ -263,16 +304,24 @@ class ProgressStore extends ChangeNotifier {
     for (final e in challenges.entries) {
       progress[e.key]?.challengesDone.addAll(e.value);
     }
+    final int earned;
     if (!completedDays.contains(t)) {
       completedDays.add(t);
       streak = lastCompleted == addDays(t, -1) ? streak + 1 : 1;
       if (streak > bestStreak) bestStreak = streak;
       lastCompleted = t;
+      sessionsCompleted++;
+      earned = dailyPoints(streak);
+    } else {
+      bonusRounds++;
+      earned = bonusRoundPoints;
     }
+    final results = [...newWordResults.values, ...reviewResults.values];
+    if (results.isNotEmpty && results.every((ok) => ok)) perfectSessions++;
+    lastReward = _award(earned);
     await _save();
   }
 
-  /// Using a word in real life is the best signal it is active vocabulary.
   /// Records extra practice. It never moves a word further out, but a miss
   /// brings the word back tomorrow.
   Future<void> completePractice({
@@ -297,14 +346,59 @@ class ProgressStore extends ChangeNotifier {
     for (final e in challenges.entries) {
       progress[e.key]?.challengesDone.addAll(e.value);
     }
+    practiceRounds++;
+    lastReward = _award(practicePoints);
     await _save();
   }
 
+  /// Using a word in real life is the best signal it is active vocabulary.
   Future<void> markUsedInLife(String id) async {
     final p = progress[id];
     if (p == null || p.lastUsedOn == today) return;
     p.usedInLife++;
     p.lastUsedOn = today;
+    _award(usedInLifePoints);
+    await _save();
+  }
+
+  int get sentenceCount =>
+      progress.values.fold<int>(0, (sum, p) => sum + p.sentences.length);
+
+  /// Adds [base] points plus any achievements that are newly earned.
+  Reward _award(int base) {
+    final fresh = [
+      for (final a in achievements)
+        if (!unlocked.contains(a.id) && a.earned(this)) a,
+    ];
+    unlocked.addAll(fresh.map((a) => a.id));
+    final total = base + fresh.fold<int>(0, (sum, a) => sum + a.points);
+    points += total;
+    return Reward(total, fresh);
+  }
+
+  Future<bool> buy(Accessory a) async {
+    if (owned.contains(a.id) || points < a.price) return false;
+    points -= a.price;
+    owned.add(a.id);
+    equipped[a.slot] = a.id;
+    await _save();
+    return true;
+  }
+
+  Future<void> toggleEquip(Accessory a) async {
+    if (!owned.contains(a.id)) return;
+    if (equipped[a.slot] == a.id) {
+      equipped.remove(a.slot);
+    } else {
+      equipped[a.slot] = a.id;
+    }
+    await _save();
+  }
+
+  Future<void> renameMascot(String name) async {
+    final n = name.trim();
+    if (n.isEmpty) return;
+    mascotName = n.length > 16 ? n.substring(0, 16) : n;
     await _save();
   }
 
