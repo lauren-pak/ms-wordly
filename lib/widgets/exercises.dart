@@ -270,7 +270,37 @@ class TypePrompt {
     this.lead,
     this.note,
     this.exact = false,
+    this.hint = true,
   });
+
+  /// A recall test question with no hint. See [buildTest] for variants.
+  factory TypePrompt.test(Word w, int variant) => switch (variant) {
+    0 => TypePrompt(
+      label: 'Recall test',
+      lead: 'Which word means:',
+      body: w.definition,
+      note: '(${w.partOfSpeech})',
+      target: w.word,
+      detail: w.example,
+      hint: false,
+    ),
+    1 => TypePrompt(
+      label: 'Recall test',
+      lead: 'Which word fits here?',
+      body: w.cloze,
+      target: w.clozeAnswer,
+      detail: w.cloze.replaceFirst('___', w.clozeAnswer),
+      hint: false,
+    ),
+    _ => TypePrompt(
+      label: 'Recall test',
+      lead: "You're about to say this. Which word you learned says it better?",
+      body: '"${w.insteadOf[(variant - 2) % w.insteadOf.length]}"',
+      target: w.word,
+      detail: w.example,
+      hint: false,
+    ),
+  };
 
   /// Fill in [Word.cloze].
   factory TypePrompt.cloze(Word w) => TypePrompt(
@@ -326,6 +356,9 @@ class TypePrompt {
 
   /// Shown after answering: the full sentence or an example.
   final String detail;
+
+  /// Whether the first letter can be revealed.
+  final bool hint;
 }
 
 /// Typed recall. Typing (not picking) is what builds active recall.
@@ -431,7 +464,7 @@ class _TypeStepViewState extends State<TypeStepView> {
           ),
         ),
         const SizedBox(height: 8),
-        if (v == null)
+        if (v == null && prompt.hint)
           Align(
             alignment: Alignment.centerLeft,
             child: hinted

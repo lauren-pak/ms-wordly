@@ -30,6 +30,9 @@ enum StepKind {
 
   /// Match several words to their meanings.
   match,
+
+  /// Recall test: a meaning or situation only, no options or hints.
+  test,
 }
 
 class SessionStep {
@@ -176,5 +179,24 @@ List<SessionStep> buildPractice(
         matchWords: matchPool,
       ),
     for (final p in words) pickExercise(p, rng),
+  ];
+}
+
+/// A recall test: one free-recall question per word, cued by its meaning,
+/// a sentence it fits, or a plain word it replaces. The variant is 0, 1, or
+/// 2 plus the index of the plain word.
+List<SessionStep> buildTest(List<WordProgress> words, {Random? random}) {
+  final rng = random ?? Random();
+  return [
+    for (final p in words)
+      SessionStep(
+        StepKind.test,
+        p.word,
+        isReview: true,
+        variant: switch (rng.nextInt(3)) {
+          2 => 2 + rng.nextInt(p.word.insteadOf.length),
+          final v => v,
+        },
+      ),
   ];
 }

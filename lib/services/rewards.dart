@@ -116,6 +116,38 @@ final List<Achievement> achievements = [
     (s) => s.usedInLifeCount >= 10,
   ),
   Achievement(
+    'mission_1',
+    '🎯',
+    'Mission accomplished',
+    "Use all three of a day's mission words",
+    30,
+    (s) => s.missionsCompleted >= 1,
+  ),
+  Achievement(
+    'mission_7',
+    '🦋',
+    'Social butterfly',
+    'Complete 7 daily missions',
+    120,
+    (s) => s.missionsCompleted >= 7,
+  ),
+  Achievement(
+    'test_1',
+    '📝',
+    'Pop quiz',
+    'Take your first recall test',
+    20,
+    (s) => s.testsTaken >= 1,
+  ),
+  Achievement(
+    'test_perfect',
+    '🧠',
+    'Total recall',
+    'Get every word right in a recall test of 5 or more',
+    60,
+    (s) => s.perfectTests >= 1,
+  ),
+  Achievement(
     'sentences_10',
     '✍️',
     'Wordsmith',
@@ -162,6 +194,12 @@ int dailyPoints(int streak) => 10 + 2 * (streak < 10 ? streak : 10);
 const int bonusRoundPoints = 5;
 const int practicePoints = 3;
 const int usedInLifePoints = 2;
+
+/// Bonus for using all of a day's mission words.
+const int missionPoints = 15;
+
+/// Points for a recall test, plus one per word recalled.
+const int testPoints = 3;
 
 /// What one action earned, shown to celebrate it.
 class Reward {

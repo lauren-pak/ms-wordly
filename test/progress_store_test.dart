@@ -200,4 +200,64 @@ void main() {
     );
     expect(steps.first.kind, isNot(StepKind.match)); // only 3 words learned
   });
+
+  test('daily mission picks three learned words and pays out once', () async {
+    final s = await open();
+    expect(s.mission, isEmpty);
+    await finishDay(s);
+    final mission = s.mission.map((w) => w.id).toList();
+    expect(mission, hasLength(missionSize));
+    expect(s.mission.map((w) => w.id), mission); // stable within the day
+
+    final before = s.points;
+    await s.markUsedInLife(mission[0]);
+    await s.markUsedInLife(mission[1]);
+    expect(s.missionDone, isFalse);
+    final reward = await s.markUsedInLife(mission[2]);
+    expect(s.missionDone, isTrue);
+    expect(s.missionsCompleted, 1);
+    expect(reward!.unlocked.map((a) => a.id), contains('mission_1'));
+    expect(s.points - before, greaterThan(3 * 2 + 15));
+    expect(await s.markUsedInLife(mission[2]), isNull);
+
+    // Next day: words just used wait while others get their turn.
+    now = now.add(const Duration(days: 1));
+    await finishDay(s);
+    final next = s.mission.map((w) => w.id).toSet();
+    expect(next.intersection(mission.toSet()), isEmpty);
+    expect(s.missionDone, isFalse);
+
+    final restored = await open();
+    expect(restored.mission.map((w) => w.id).toSet(), next);
+    expect(restored.missionsCompleted, 1);
+  });
+
+  test('recall test misses drop a level and come back tomorrow', () async {
+    final s = await open();
+    for (var i = 0; i < 4; i++) {
+      await finishDay(s);
+      now = now.add(const Duration(days: 1));
+    }
+    final words = s.testSet(random: Random(1));
+    expect(words, hasLength(testSize));
+    final hit = words[0], miss = words[1];
+    miss.level = 3;
+    miss.due = addDays(s.today, 10);
+    await s.completeTest({hit.id: true, miss.id: false});
+    expect(miss.level, 2);
+    expect(miss.due, addDays(s.today, 1));
+    expect(s.testsTaken, 1);
+    expect(s.unlocked, contains('test_1'));
+
+    await s.completeTest({for (final w in words.take(5)) w.id: true});
+    expect(s.unlocked, contains('test_perfect'));
+  });
+
+  test('recall test questions use no options or hints', () {
+    final s = buildTest([
+      WordProgress(id: 'candid', learnedOn: '2026-10-01', due: '2026-10-02'),
+    ], random: Random(3));
+    expect(s.single.kind, StepKind.test);
+    expect(s.single.options, isEmpty);
+  });
 }

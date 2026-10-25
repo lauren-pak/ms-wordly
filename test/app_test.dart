@@ -40,13 +40,20 @@ void main() {
     await tester.tap(find.text('Back home'));
     await tester.pumpAndSettle();
     expect(find.text('Done for today'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('🎯 Use it today'), 100);
+    expect(find.text('🎯 Use it today'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('I used it').first, 100);
+    await tester.ensureVisible(find.text('I used it').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('I used it').first);
     await tester.pumpAndSettle();
     expect(store.usedInLifeCount, 1);
+    expect(find.textContaining('Out in the wild'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5)); // let the snack bar go
+    await tester.pumpAndSettle();
 
     // Extra practice after the daily session.
-    await tester.scrollUntilVisible(find.text('Practice'), 100);
+    await tester.scrollUntilVisible(find.text('Practice'), -100);
     await tester.ensureVisible(find.text('Practice'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Practice'));
@@ -63,5 +70,27 @@ void main() {
     }
     expect(find.text('Back home'), findsOneWidget);
     expect(store.currentStreak, 1);
+    await tester.tap(find.text('Back home'));
+    await tester.pumpAndSettle();
+
+    // A recall test: type nothing, give up on each.
+    await tester.scrollUntilVisible(find.text('Recall test'), 100);
+    await tester.ensureVisible(find.text('Recall test'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Recall test'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hint'), findsNothing);
+    for (var i = 0; i < 20; i++) {
+      if (find.textContaining('recalled').evaluate().isNotEmpty) break;
+      for (final label in ['Continue', "I don't know"]) {
+        if (find.text(label).evaluate().isNotEmpty) {
+          await tester.tap(find.text(label));
+          break;
+        }
+      }
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('0 / 3 recalled'), findsOneWidget);
+    expect(store.testsTaken, 1);
   });
 }

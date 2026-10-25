@@ -10,6 +10,12 @@ import 'rewards.dart';
 import 'session_builder.dart' show recentLimit;
 
 const int wordsPerDay = 3;
+
+/// Words in each day's "use it today" mission.
+const int missionSize = 3;
+
+/// Words in a recall test.
+const int testSize = 10;
 const int maxReviewsPerDay = 12;
 
 /// Level at which a word counts as part of your active vocabulary.
@@ -116,6 +122,15 @@ class ProgressStore extends ChangeNotifier {
   String? planDate;
   List<String> planWordIds = [];
 
+  /// Today's "use it today" mission: learned words to use for real.
+  String? missionDate;
+  List<String> missionWordIds = [];
+  String? missionDoneDate;
+  int missionsCompleted = 0;
+
+  int testsTaken = 0;
+  int perfectTests = 0;
+
   /// Difficulty of new words; null mixes all levels.
   Difficulty? difficulty = Difficulty.stretch;
 
@@ -134,6 +149,7 @@ class ProgressStore extends ChangeNotifier {
   Reward? lastReward;
 
   String get today => dayKey(_clock());
+  DateTime get now => _clock();
 
   static Future<ProgressStore> open() async =>
       ProgressStore(await SharedPreferences.getInstance());
@@ -152,6 +168,13 @@ class ProgressStore extends ChangeNotifier {
     lastCompleted = j['lastCompleted'] as String?;
     planDate = j['planDate'] as String?;
     planWordIds = (j['planWordIds'] as List).cast<String>();
+    missionDate = j['missionDate'] as String?;
+    missionWordIds = [
+      ...?(j['missionWordIds'] as List?)?.cast<String>().where(
+        progress.containsKey,
+      ),
+    ];
+    missionDoneDate = j['missionDoneDate'] as String?;
     final d = j['difficulty'] as String?;
     if (j.containsKey('difficulty')) {
       difficulty = d == null ? null : Difficulty.values.byName(d);
@@ -171,6 +194,9 @@ class ProgressStore extends ChangeNotifier {
     perfectSessions = r['perfectSessions'] as int;
     practiceRounds = r['practiceRounds'] as int;
     bonusRounds = r['bonusRounds'] as int;
+    missionsCompleted = r['missionsCompleted'] as int? ?? 0;
+    testsTaken = r['testsTaken'] as int? ?? 0;
+    perfectTests = r['perfectTests'] as int? ?? 0;
   }
 
   Future<void> _save() async {
@@ -189,6 +215,9 @@ class ProgressStore extends ChangeNotifier {
         'lastCompleted': lastCompleted,
         'planDate': planDate,
         'planWordIds': planWordIds,
+        'missionDate': missionDate,
+        'missionWordIds': missionWordIds,
+        'missionDoneDate': missionDoneDate,
         'difficulty': difficulty?.name,
         'rewards': {
           'points': points,
@@ -200,6 +229,9 @@ class ProgressStore extends ChangeNotifier {
           'perfectSessions': perfectSessions,
           'practiceRounds': practiceRounds,
           'bonusRounds': bonusRounds,
+          'missionsCompleted': missionsCompleted,
+          'testsTaken': testsTaken,
+          'perfectTests': perfectTests,
         },
       }),
     );
@@ -392,13 +424,104 @@ class ProgressStore extends ChangeNotifier {
     }
   }
 
+  /// Today's mission: learned words to use in a real conversation or
+  /// message. Picked once a day, and topped up if fewer words were learned
+  /// when it was picked.
+  List<Word> get mission {
+    final t = today;
+    if (missionDate != t) {
+      missionDate = t;
+      missionWordIds = [];
+    }
+    if (missionWordIds.length < missionSize &&
+        progress.length > missionWordIds.length) {
+      missionWordIds.addAll(
+        _missionCandidates()
+            .take(missionSize - missionWordIds.length)
+            .map((p) => p.id),
+      );
+      _persist();
+    }
+    return missionWordIds.map((id) => wordsById[id]!).toList();
+  }
+
+  /// Words that most need real use: least used, then not yet active, then
+  /// most recently learned. Words used in the last two days wait their turn.
+  List<WordProgress> _missionCandidates() {
+    final yesterday = addDays(today, -1);
+    bool usedLately(WordProgress p) =>
+        p.lastUsedOn != null && p.lastUsedOn!.compareTo(yesterday) >= 0;
+    final pool =
+        progress.values.where((p) => !missionWordIds.contains(p.id)).toList()
+          ..sort((a, b) {
+            for (final c in [
+              (usedLately(a) ? 1 : 0) - (usedLately(b) ? 1 : 0),
+              a.usedInLife.compareTo(b.usedInLife),
+              (a.mastered ? 1 : 0) - (b.mastered ? 1 : 0),
+              b.learnedOn.compareTo(a.learnedOn),
+            ]) {
+              if (c != 0) return c;
+            }
+            return a.id.compareTo(b.id);
+          });
+    return pool;
+  }
+
+  bool get missionDone => missionDoneDate == today;
+
   /// Using a word in real life is the best signal it is active vocabulary.
-  Future<void> markUsedInLife(String id) async {
+  /// Returns what it earned, including the mission bonus when this was the
+  /// last mission word.
+  Future<Reward?> markUsedInLife(String id) async {
     final p = progress[id];
-    if (p == null || p.lastUsedOn == today) return;
+    if (p == null || p.lastUsedOn == today) return null;
     p.usedInLife++;
     p.lastUsedOn = today;
-    _award(usedInLifePoints);
+    var base = usedInLifePoints;
+    final words = mission;
+    if (!missionDone &&
+        words.length == missionSize &&
+        words.every((w) => usedToday(w.id))) {
+      missionDoneDate = today;
+      missionsCompleted++;
+      base += missionPoints;
+    }
+    final reward = _award(base);
+    await _save();
+    return reward;
+  }
+
+  /// Learned words for a recall test, oldest reviews first so words that
+  /// haven't come up in a while are checked.
+  List<WordProgress> testSet({int count = testSize, Random? random}) {
+    final rng = random ?? Random();
+    final words = progress.values.toList()..shuffle(rng);
+    words.sort((a, b) => b.due.compareTo(a.due));
+    return (words.take(count).toList()..shuffle(rng));
+  }
+
+  /// Records a recall test. Free recall is the real test of active
+  /// vocabulary, so a word that wasn't recalled drops a level and comes
+  /// back tomorrow.
+  Future<void> completeTest(Map<String, bool> results) async {
+    final tomorrow = addDays(today, 1);
+    for (final e in results.entries) {
+      final p = progress[e.key];
+      if (p == null) continue;
+      if (e.value) {
+        p.correct++;
+      } else {
+        p.wrong++;
+        p.level = (p.level - 1).clamp(1, 99);
+        if (p.due.compareTo(tomorrow) > 0) p.due = tomorrow;
+      }
+    }
+    testsTaken++;
+    if (results.length >= 5 && results.values.every((ok) => ok)) {
+      perfectTests++;
+    }
+    final right = results.values.where((ok) => ok).length;
+    lastReward = _award(testPoints + right);
     await _save();
   }
 

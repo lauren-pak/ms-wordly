@@ -7,6 +7,7 @@ import '../services/session_builder.dart';
 import '../widgets/exercises.dart';
 import 'done_screen.dart';
 import 'settings_screen.dart';
+import 'test_result_screen.dart';
 
 enum SessionMode {
   /// Today's words plus due reviews. Finishing it keeps the streak.
@@ -17,6 +18,9 @@ enum SessionMode {
 
   /// A few learned words, one exercise each, without moving the schedule.
   practice,
+
+  /// Free recall of learned words with no options, hints, or retries.
+  test,
 }
 
 class SessionScreen extends StatefulWidget {
@@ -71,6 +75,11 @@ class _SessionScreenState extends State<SessionScreen> {
         final words = store.practiceSet();
         reviewIds.addAll(words.map((r) => r.id));
         queue = buildPractice(words, learned: store.progress.values.toList());
+      case SessionMode.test:
+        newWords = [];
+        final words = store.testSet();
+        reviewIds.addAll(words.map((r) => r.id));
+        queue = buildTest(words);
     }
     plannedSteps = queue.length;
     // Nothing due and no new words left: checking in still counts the day.
@@ -92,6 +101,15 @@ class _SessionScreenState extends State<SessionScreen> {
 
   void advance(bool passed, {String? sentence, String? challengeId}) {
     final step = queue[index];
+    if (step.kind == StepKind.test) {
+      if (!passed) missed.add(step.word.id);
+      if (index + 1 >= queue.length) {
+        finish();
+      } else {
+        setState(() => index++);
+      }
+      return;
+    }
     final perWord = step.kind != StepKind.learn && step.kind != StepKind.match;
     if (perWord && !step.isRetry && step.kind != StepKind.choose) {
       exercises.putIfAbsent(step.word.id, () => []).add(step.key);
@@ -122,6 +140,19 @@ class _SessionScreenState extends State<SessionScreen> {
 
   Future<void> finish() async {
     setState(() => finishing = true);
+    if (widget.mode == SessionMode.test) {
+      final results = {
+        for (final step in queue) step.word.id: !missed.contains(step.word.id),
+      };
+      await store.completeTest(results);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => TestResultScreen(store: store, results: results),
+        ),
+      );
+      return;
+    }
     if (widget.mode == SessionMode.practice) {
       await store.completePractice(
         results: {for (final id in reviewIds) id: !missed.contains(id)},
@@ -211,6 +242,12 @@ class _SessionScreenState extends State<SessionScreen> {
               },
               onAnswered: advance,
             ),
+            StepKind.test => TypeStepView(
+              key: key,
+              word: step.word,
+              prompt: TypePrompt.test(step.word, step.variant),
+              onAnswered: advance,
+            ),
             StepKind.match => MatchStepView(
               key: key,
               words: step.matchWords,
@@ -247,9 +284,11 @@ class _SessionScreenState extends State<SessionScreen> {
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: Chip(
-                  label: Text(
-                    widget.mode == SessionMode.practice ? 'Practice' : 'Review',
-                  ),
+                  label: Text(switch (widget.mode) {
+                    SessionMode.practice => 'Practice',
+                    SessionMode.test => 'Test ${index + 1}/$plannedSteps',
+                    _ => 'Review',
+                  }),
                 ),
               ),
           ],
